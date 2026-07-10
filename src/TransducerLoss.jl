@@ -1,0 +1,60 @@
+"""
+    TransducerLoss
+
+The **transducer-loss family** for Julia — GPU-capable via
+[KernelAbstractions](https://github.com/JuliaGPU/KernelAbstractions.jl),
+with analytic gradients delivered through
+[ChainRulesCore](https://github.com/JuliaDiff/ChainRulesCore.jl) `rrule`s so
+Zygote never traces the lattice kernels. The companion package to
+[CTCLoss.jl](https://github.com/mashu/CTCLoss.jl), sharing its conventions:
+blank defaults to the **last** class, the loss is the **batch mean**, and
+gradients w.r.t. **raw logits** are computed inside the forward-backward.
+
+Two losses, one lattice core:
+
+- [`rnnt_loss_batched`](@ref) — vanilla RNN-T (Graves 2012,
+  arXiv:1211.3711): blank advances time by one, labels advance the label
+  axis in place.
+- [`tdt_loss_batched`](@ref) — Token-and-Duration Transducer (Xu et al.,
+  ICML 2023, arXiv:2304.06795): a second duration head lets every emission
+  advance time by a learned stride, enabling frame-skipping decode; with
+  `durations = [0, 1]` its alignment space strictly contains RNN-T's.
+
+They live in one package deliberately: both operate on the same
+`(t frames, u labels)` lattice and share the emission gather, α
+initialization, NLL read-out, label packing, numerics, and test oracles
+(`src/core/`). The `src/rnnt/` and `src/tdt/` subtrees depend only on
+`core/`, never on each other — so splitting one out later is trivial, but
+bundling avoids duplicated kernels or a micro-package depending on another
+package's internals (the same reason NeMo, k2, and torchaudio ship their
+transducer variants together).
+
+Both forward-backwards run as diagonal wavefronts: all lattice cells with
+`t + u = d` are independent given neighbouring diagonals, so the host loops
+over diagonals and each kernel launch fills one anti-diagonal for the whole
+batch. Every recurrence and gradient formula was validated against
+brute-force enumeration of all lattice paths and central finite differences
+(max error ~1e-10) before transcription; the test suite repeats both checks
+in pure Julia.
+"""
+module TransducerLoss
+
+using KernelAbstractions
+using ChainRulesCore: ChainRulesCore, NoTangent
+using NNlib: logsoftmax
+
+export pack_transducer_targets,
+       rnnt_forward_backward,
+       rnnt_loss_batched,
+       tdt_forward_backward,
+       tdt_loss_batched
+
+include("core/utils.jl")     # logaddexp
+include("core/labels.jl")    # pack_transducer_targets
+include("core/kernels.jl")   # gather, α init, NLL read-out (loss-agnostic)
+include("rnnt/kernels.jl")   # RNN-T diagonal/gradient kernels
+include("rnnt/loss.jl")      # RNN-T driver + API + rrules
+include("tdt/kernels.jl")    # TDT diagonal/gradient kernels
+include("tdt/loss.jl")       # TDT driver + API + rrule
+
+end
