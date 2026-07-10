@@ -19,6 +19,10 @@ Two losses, one lattice core:
   ICML 2023, arXiv:2304.06795): a second duration head lets every emission
   advance time by a learned stride, enabling frame-skipping decode; with
   `durations = [0, 1]` its alignment space strictly contains RNN-T's.
+- [`monotonic_rnnt_loss_batched`](@ref) — Monotonic RNN-T as TDT with
+  `durations = [1]` (diagonal-only alignments).
+- **FastEmit** — `fastemit_lambda` on RNN-T and TDT (Yu et al.,
+  arXiv:2010.11148); gradient-only latency regularization.
 
 They live in one package deliberately: both operate on the same
 `(t frames, u labels)` lattice and share the emission gather, α
@@ -47,7 +51,8 @@ export pack_transducer_targets,
        rnnt_forward_backward,
        rnnt_loss_batched,
        tdt_forward_backward,
-       tdt_loss_batched
+       tdt_loss_batched,
+       monotonic_rnnt_loss_batched
 
 include("core/utils.jl")     # logaddexp
 include("core/labels.jl")    # pack_transducer_targets

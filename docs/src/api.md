@@ -9,6 +9,7 @@ TransducerLoss
 ```@docs
 rnnt_loss_batched
 tdt_loss_batched
+monotonic_rnnt_loss_batched
 ```
 
 ## Helpers
@@ -31,6 +32,7 @@ TransducerLoss.logaddexp
 |----------|-------------|
 | `rnnt_loss_batched` | Batched RNN-T / vanilla transducer loss (Graves 2012) |
 | `tdt_loss_batched` | Batched Token-and-Duration Transducer loss (Xu et al., ICML 2023) |
+| `monotonic_rnnt_loss_batched` | Monotonic RNN-T via TDT with `durations = [1]` |
 | `pack_transducer_targets` | Pack ragged label sequences into a padded matrix |
 | `rnnt_forward_backward` | Internal RNN-T forward-backward; returns `(loss, grad)` |
 | `tdt_forward_backward` | Internal TDT forward-backward; returns `(loss, grad_tok, grad_dur)` |

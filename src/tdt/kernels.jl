@@ -84,7 +84,7 @@ end
         @Const(ld::AbstractArray{T,4}), @Const(lab::AbstractMatrix{Int32}),
         @Const(dur::AbstractVector{Int32}), @Const(Ul::AbstractVector{Int32}),
         @Const(Tl::AbstractVector{Int32}), @Const(nll::AbstractVector{T}),
-        σ::T, blank::Int32) where {T}
+        σ::T, blank::Int32, fastemit::T) where {T}
     t, u, b = @index(Global, NTuple)
     @inbounds begin
         V = size(gtok, 1)
@@ -121,8 +121,9 @@ end
                 if u < U1 && tn <= Tb
                     post = exp(α[t, u, b] + em_l[t, u, b] + ld[i, t, u, b] -
                                σ + β[tn, u + Int32(1), b] + nll_b)
-                    gtok[lab[u, b], t, u, b] -= post
-                    gdur[i, t, u, b] -= post
+                    scale = T(1) + fastemit
+                    gtok[lab[u, b], t, u, b] -= scale * post
+                    gdur[i, t, u, b] -= scale * post
                 end
             end
         end

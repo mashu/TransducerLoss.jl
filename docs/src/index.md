@@ -33,6 +33,12 @@ loss = rnnt_loss_batched(logits, targets, input_lengths, blank)
 # token head (V, T, U+1, B) + duration head (D, T, U+1, B)
 loss = tdt_loss_batched(logits, dur_logits, targets, input_lengths,
                         [0, 1, 2, 3, 4]; blank, sigma = 0.05)
+
+# Monotonic RNN-T (diagonal-only alignments): TDT with durations = [1]
+loss = monotonic_rnnt_loss_batched(logits, targets, input_lengths)
+
+# FastEmit latency regularization (torchaudio / NeMo / k2 compatible)
+loss = rnnt_loss_batched(logits, targets, input_lengths; fastemit_lambda = 0.004)
 ```
 
 ### Tensor shapes
@@ -117,14 +123,43 @@ time the duration head's prediction advances the encoder index — the
 frame-skipping behind the 2–3× throughput lead of TDT models on the open
 ASR leaderboards.
 
+**FastEmit** ([Yu et al., arXiv:2010.11148](https://arxiv.org/abs/2010.11148)):
+optional `fastemit_lambda` on both [`rnnt_loss_batched`](@ref) and
+[`tdt_loss_batched`](@ref). Scales label-emission gradients by `(1 + λ)`;
+the loss scalar stays the standard NLL (gradient-only regularization, as in
+torchaudio / NeMo / k2). Verified analytically against label-emission
+posteriors; `λ = 0` recovers the base transducer.
+
+## Transducer family coverage
+
+| Variant | Status in this package |
+|---------|------------------------|
+| **RNN-T** (Graves 2012) | [`rnnt_loss_batched`](@ref) |
+| **TDT** (Xu et al., ICML 2023) | [`tdt_loss_batched`](@ref) |
+| **Monotonic RNN-T** | [`monotonic_rnnt_loss_batched`](@ref) — TDT with `durations = [1]` |
+| **FastEmit** regularization | `fastemit_lambda` kwarg on RNN-T and TDT |
+| **Multi-blank transducer** | Subsumed by TDT (duration head generalizes frame skipping) |
+| **RNA / diagonal-only** | Same lattice as Monotonic RNN-T (`durations = [1]`) |
+| **Pruned RNN-T** (k2) | Planned — banded lattice, same objective, ~10× memory |
+| **HAT** (blank factorization + ILM) | Planned — separate blank stream for shallow fusion |
+| **Bayes-risk / delay-penalty** | Out of scope for v0.1 (k2-style risk objectives) |
+| **Alignment-restricted (Ar-RNN-T)** | Out of scope (requires external alignments) |
+
+Monotonic RNN-T is not a separate kernel tree: every token transition must
+advance time by exactly one frame, so the alignment lattice is a subset of
+vanilla RNN-T's. Setting TDT `durations = [1]` enforces this — blank and
+label moves are both diagonal, with a trivial single-class duration head.
+
 ## Verification
 
 Every recurrence and gradient formula was validated **before transcription**
 against brute-force enumeration of all lattice paths and central finite
 differences (max error ≈ 1e-10 in double precision), including empty targets,
 `T = 1`, zero-length inputs, padded prediction axes, duration sets without 0,
-and `sigma ≠ 0`. The test suite repeats every check in pure Julia, plus
-Zygote integration (both heads for TDT) and heterogeneous-batch consistency.
+and `sigma ≠ 0`. FastEmit (`λ > 0`) is checked by decomposing gradients into
+the `λ = 0` base plus label-posterior scaling. The test suite repeats every
+check in pure Julia, plus Zygote integration (both heads for TDT) and
+heterogeneous-batch consistency.
 
 ## Memory
 

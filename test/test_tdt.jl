@@ -25,7 +25,7 @@
         d4 = reshape(dur, size(dur)..., 1)
         labels, tlens = pack_transducer_targets([target], blank)
         _, gtok, gdur = tdt_forward_backward(t4, d4, labels, tlens, [T],
-                                             durs, blank, sigma)
+                                             durs, blank, sigma, 0)
         ε = 1e-6
         for i in eachindex(t4)
             p = copy(t4); p[i] += ε
@@ -54,7 +54,7 @@
             tok, dur)
         labels, tlens = pack_transducer_targets(targets, 4)
         _, rt, rd = tdt_forward_backward(tok, dur, labels, tlens, lens,
-                                         durs, 4, 0.05)
+                                         durs, 4, 0.05, 0)
         @test gt ≈ rt
         @test gd ≈ rd
 
@@ -73,5 +73,43 @@
         @test_throws ArgumentError tdt_loss_batched(tok, dur[:, 1:3, :, :],
                                                     targets, lens, durs;
                                                     blank = 4)               # (T,U+1,B) mismatch
+    end
+    @testset "TDT: FastEmit gradient scaling" begin
+        V, T, target, durs = 4, 4, [1, 2], [0, 1, 2]
+        blank, sigma, λ = 4, 0.05, 0.2
+        tok = randn(rng, V, T, 3, 1)
+        dur = randn(rng, length(durs), T, 3, 1)
+        labels, tlens = pack_transducer_targets([target], blank)
+        l0, g0, gd0 = tdt_forward_backward(tok, dur, labels, tlens, [T],
+                                           durs, blank, sigma, 0)
+        lλ, gλ, gdλ = tdt_forward_backward(tok, dur, labels, tlens, [T],
+                                           durs, blank, sigma, λ)
+        @test l0 ≈ lλ
+        posts = ref_tdt_label_posts(tok[:, :, :, 1], dur[:, :, :, 1],
+                                    target, blank, durs, sigma)
+        by_tok = Dict{Tuple{Int,Int,Int}, Float64}()
+        for (t, u, k, i, post) in posts
+            key = (t, u, k)
+            by_tok[key] = get(by_tok, key, 0.0) + post
+            @test gdλ[i, t, u, 1] - gd0[i, t, u, 1] ≈ -λ * post atol = 1e-7
+        end
+        for ((t, u, k), post_sum) in by_tok
+            @test gλ[k, t, u, 1] - g0[k, t, u, 1] ≈ -λ * post_sum atol = 1e-7
+        end
+    end
+    @testset "Monotonic RNN-T via TDT durations=[1]" begin
+        V, T, target = 4, 5, [1, 2, 3]
+        blank = V
+        tok = randn(rng, V, T, length(target) + 1)
+        dur0 = zeros(Float64, 1, T, length(target) + 1)
+        mono = monotonic_rnnt_loss_batched(reshape(tok, size(tok)..., 1),
+                                           [target], [T]; blank)
+        tdt1 = tdt_loss_batched(reshape(tok, size(tok)..., 1),
+                                reshape(dur0, size(dur0)..., 1),
+                                [target], [T], [1]; blank)
+        @test mono ≈ tdt1 atol = 1e-8
+        @test mono ≈ brute_tdt_nll(tok, dur0, target, blank, [1], 0.0) atol = 1e-8
+        rnnt = single(tok, target, blank)
+        @test mono != rnnt
     end
 end

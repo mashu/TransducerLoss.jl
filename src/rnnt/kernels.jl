@@ -53,7 +53,7 @@ end
         @Const(em_b::AbstractArray{T,3}), @Const(em_l::AbstractArray{T,3}),
         @Const(lp::AbstractArray{T,4}), @Const(lab::AbstractMatrix{Int32}),
         @Const(Ul::AbstractVector{Int32}), @Const(Tl::AbstractVector{Int32}),
-        @Const(nll::AbstractVector{T}), blank::Int32) where {T}
+        @Const(nll::AbstractVector{T}), blank::Int32, fastemit::T) where {T}
     t, u, b = @index(Global, NTuple)
     @inbounds begin
         V = size(grad, 1)
@@ -77,8 +77,9 @@ end
             grad[blank, t, u, b] -= exp(α[t, u, b] + em_b[t, u, b] + βnext + nll_b)
             if u < U1
                 k = lab[u, b]
-                grad[k, t, u, b] -= exp(α[t, u, b] + em_l[t, u, b] +
-                                        β[t, u + Int32(1), b] + nll_b)
+                post = exp(α[t, u, b] + em_l[t, u, b] +
+                           β[t, u + Int32(1), b] + nll_b)
+                grad[k, t, u, b] -= (T(1) + fastemit) * post
             end
         end
     end

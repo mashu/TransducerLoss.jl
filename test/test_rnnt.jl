@@ -22,7 +22,7 @@
         logits = randn(rng, V, T, length(target) + 1)
         labels, tlens = pack_transducer_targets([target], blank)
         l4 = reshape(logits, size(logits)..., 1)
-        _, grad = rnnt_forward_backward(l4, labels, tlens, [T], blank)
+        _, grad = rnnt_forward_backward(l4, labels, tlens, [T], blank, 0)
         ε = 1e-6
         for i in eachindex(l4)
             lp = copy(l4); lp[i] += ε
@@ -38,7 +38,7 @@
         lens = [5, 4]
         g = Zygote.gradient(l -> rnnt_loss_batched(l, targets, lens), logits)[1]
         labels, tlens = pack_transducer_targets(targets, 4)
-        _, grad = rnnt_forward_backward(logits, labels, tlens, lens, 4)
+        _, grad = rnnt_forward_backward(logits, labels, tlens, lens, 4, 0)
         @test g ≈ grad
         # keyword-blank form differentiates too
         g2 = Zygote.gradient(
@@ -65,5 +65,30 @@
         @test isinf(l0)
         g0 = Zygote.gradient(l -> rnnt_loss_batched(l, [[1]], [0], 4), logits)[1]
         @test all(iszero, g0)
+    end
+    @testset "FastEmit: loss unchanged, gradient scaling" begin
+        V, T, target, blank = 4, 4, [1, 2], 4
+        logits = randn(rng, V, T, length(target) + 1, 1)
+        labels, tlens = pack_transducer_targets([target], blank)
+        λ = 0.25
+        l0, g0 = rnnt_forward_backward(logits, labels, tlens, [T], blank, 0)
+        lλ, gλ = rnnt_forward_backward(logits, labels, tlens, [T], blank, λ)
+        @test l0 ≈ lλ
+        posts = ref_rnnt_label_posts(logits[:, :, :, 1], target, blank)
+        for (t, u, k, post) in posts
+            @test gλ[k, t, u, 1] - g0[k, t, u, 1] ≈ -λ * post atol = 1e-8
+        end
+        # non-label cells are identical
+        mask = falses(size(logits))
+        for (t, u, k, _) in posts
+            mask[k, t, u, 1] = true
+        end
+        @test gλ[.!mask] ≈ g0[.!mask]
+        # λ = 0 matches public API default
+        @test rnnt_loss_batched(logits, [target], [T]; fastemit_lambda = λ) ≈ l0
+        g_z = Zygote.gradient(
+            l -> rnnt_loss_batched(l, [target], [T]; fastemit_lambda = λ),
+            logits)[1]
+        @test g_z ≈ gλ
     end
 end

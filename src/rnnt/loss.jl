@@ -1,7 +1,8 @@
 # Vanilla RNN-T: batched forward-backward driver and public API.
 
 """
-    rnnt_forward_backward(logits, labels, target_lengths, input_lengths, blank)
+    rnnt_forward_backward(logits, labels, target_lengths, input_lengths,
+                          blank, fastemit_lambda)
 
 Internal: run the transducer forward-backward on whatever device holds
 `logits` and return `(loss, grad)` where `loss` is the batch-mean NLL and
@@ -12,13 +13,16 @@ function rnnt_forward_backward(logits::AbstractArray{T,4},
                                labels::Matrix{Int32},
                                target_lengths::Vector{Int32},
                                input_lengths::Vector{Int},
-                               blank::Int) where {T}
+                               blank::Int,
+                               fastemit_lambda::Real) where {T}
     V, Tmax, U1max, B = size(logits)
     1 <= blank <= V || throw(ArgumentError("blank $blank outside 1:$V"))
     maximum(target_lengths; init = Int32(0)) + 1 <= U1max ||
         throw(ArgumentError("logits provide $U1max prediction states but " *
             "targets need $(maximum(target_lengths) + 1)"))
     backend = KernelAbstractions.get_backend(logits)
+    λ = T(fastemit_lambda)
+    fastemit_lambda >= 0 || throw(ArgumentError("fastemit_lambda must be ≥ 0"))
 
     clamped = Int32.(clamp.(input_lengths, 0, Tmax))
     lab_d = copyto!(similar(logits, Int32, size(labels)...), labels)
@@ -49,9 +53,9 @@ function rnnt_forward_backward(logits::AbstractArray{T,4},
     nll = similar(logits, T, B)
     lattice_nll_kernel!(backend)(nll, β, Tl_d; ndrange = B)
 
-    grad = similar(logits, T, Tmax, U1max, B)
+    grad = similar(logits)
     rnnt_grad_kernel!(backend)(grad, α, β, em_b, em_l, log_probs, lab_d,
-                               Ul_d, Tl_d, nll, Int32(blank);
+                               Ul_d, Tl_d, nll, Int32(blank), λ;
                                ndrange = (Tmax, U1max, B))
 
     KernelAbstractions.synchronize(backend)
@@ -61,8 +65,8 @@ end
 
 
 """
-    rnnt_loss_batched(logits, targets, input_lengths [; blank])
-    rnnt_loss_batched(logits, targets, input_lengths, blank)
+    rnnt_loss_batched(logits, targets, input_lengths [; blank, fastemit_lambda])
+    rnnt_loss_batched(logits, targets, input_lengths, blank [; fastemit_lambda])
 
 Batched RNN-T / transducer loss (Graves 2012), mean over batch.
 
@@ -72,6 +76,10 @@ Batched RNN-T / transducer loss (Graves 2012), mean over batch.
 - `targets`: `Vector{Vector{Int}}` label sequences (no blank).
 - `input_lengths`: valid encoder frames per sample.
 - `blank` defaults to `size(logits, 1)` (last class), matching CTCLoss.jl.
+- `fastemit_lambda`: FastEmit regularization (Yu et al., arXiv:2010.11148).
+  Scales label-emission gradients by `(1 + λ)`; `0` disables. The reported
+  loss scalar is unchanged (standard NLL); only gradients are modified,
+  matching torchaudio / NeMo / k2.
 
 Gradients are supplied through a ChainRulesCore `rrule` computed inside the
 same forward-backward pass, so Zygote never traces the kernels. Memory note:
@@ -81,29 +89,33 @@ or smaller batches.
 function rnnt_loss_batched(logits::AbstractArray{T,4},
                            targets::Vector{Vector{Int}},
                            input_lengths::Vector{Int};
-                           blank::Int = size(logits, 1)) where {T}
+                           blank::Int = size(logits, 1),
+                           fastemit_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, _ = rnnt_forward_backward(logits, labels, target_lengths,
-                                    input_lengths, blank)
+                                    input_lengths, blank, fastemit_lambda)
     loss
 end
 
 function rnnt_loss_batched(logits::AbstractArray{T,4},
                            targets::Vector{Vector{Int}},
                            input_lengths::Vector{Int},
-                           blank::Int) where {T}
-    rnnt_loss_batched(logits, targets, input_lengths; blank)
+                           blank::Int;
+                           fastemit_lambda::Real = 0) where {T}
+    rnnt_loss_batched(logits, targets, input_lengths; blank, fastemit_lambda)
 end
 
 function ChainRulesCore.rrule(::typeof(rnnt_loss_batched),
                               logits::AbstractArray{T,4},
                               targets::Vector{Vector{Int}},
                               input_lengths::Vector{Int};
-                              blank::Int = size(logits, 1)) where {T}
+                              blank::Int = size(logits, 1),
+                              fastemit_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, grad = rnnt_forward_backward(logits, labels, target_lengths,
-                                       input_lengths, blank)
-    rnnt_pullback(Δ) = (NoTangent(), Δ * grad, NoTangent(), NoTangent())
+                                       input_lengths, blank, fastemit_lambda)
+    rnnt_pullback(Δ) = (NoTangent(), Δ * grad, NoTangent(), NoTangent(),
+                        NoTangent())
     loss, rnnt_pullback
 end
 
@@ -111,10 +123,11 @@ function ChainRulesCore.rrule(::typeof(rnnt_loss_batched),
                               logits::AbstractArray{T,4},
                               targets::Vector{Vector{Int}},
                               input_lengths::Vector{Int},
-                              blank::Int) where {T}
+                              blank::Int;
+                              fastemit_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, grad = rnnt_forward_backward(logits, labels, target_lengths,
-                                       input_lengths, blank)
+                                       input_lengths, blank, fastemit_lambda)
     rnnt_pullback(Δ) = (NoTangent(), Δ * grad, NoTangent(), NoTangent(),
                         NoTangent())
     loss, rnnt_pullback

@@ -14,7 +14,7 @@ function tdt_forward_backward(logits::AbstractArray{T,4},
                               target_lengths::Vector{Int32},
                               input_lengths::Vector{Int},
                               durations::Vector{Int}, blank::Int,
-                              sigma::Real) where {T}
+                              sigma::Real, fastemit_lambda::Real) where {T}
     V, Tmax, U1max, B = size(logits)
     size(dur_logits)[2:4] == (Tmax, U1max, B) || throw(ArgumentError(
         "dur_logits must share (T, U+1, B) with logits"))
@@ -31,6 +31,8 @@ function tdt_forward_backward(logits::AbstractArray{T,4},
             "targets need $(maximum(target_lengths) + 1)"))
     backend = KernelAbstractions.get_backend(logits)
     σ = T(sigma)
+    λ = T(fastemit_lambda)
+    fastemit_lambda >= 0 || throw(ArgumentError("fastemit_lambda must be ≥ 0"))
 
     clamped = Int32.(clamp.(input_lengths, 0, Tmax))
     lab_d = copyto!(similar(logits, Int32, size(labels)...), labels)
@@ -65,10 +67,10 @@ function tdt_forward_backward(logits::AbstractArray{T,4},
     nll = similar(logits, T, B)
     lattice_nll_kernel!(backend)(nll, β, Tl_d; ndrange = B)
 
-    gtok = similar(logits, T, V, Tmax, U1max, B)
-    gdur = similar(logits, T, size(dur_logits, 1), Tmax, U1max, B)
+    gtok = similar(logits)
+    gdur = similar(dur_logits)
     tdt_grad_kernel!(backend)(gtok, gdur, α, β, em_b, em_l, lp, ld, lab_d,
-                              dur_d, Ul_d, Tl_d, nll, σ, Int32(blank);
+                              dur_d, Ul_d, Tl_d, nll, σ, Int32(blank), λ;
                               ndrange = (Tmax, U1max, B))
 
     KernelAbstractions.synchronize(backend)
@@ -78,7 +80,7 @@ end
 
 """
     tdt_loss_batched(logits, dur_logits, targets, input_lengths, durations;
-                     blank = size(logits, 1), sigma = 0)
+                     blank = size(logits, 1), sigma = 0, fastemit_lambda = 0)
 
 Batched **Token-and-Duration Transducer** loss (Xu et al., ICML 2023,
 arXiv:2304.06795) — the frame-skipping generalization of RNN-T behind
@@ -93,11 +95,16 @@ last token class (the CTCLoss.jl / TransducerLoss.jl convention).
   frame, as in RNN-T). The exit blank lands exactly on frame `T + 1`.
 - `sigma`: NeMo's logit under-normalization constant (≈ 0.05 recommended;
   0 disables).
+- `fastemit_lambda`: FastEmit regularization; scales label-emission
+  gradients by `(1 + λ)` on both token and duration heads. Loss scalar
+  unchanged; see [`rnnt_loss_batched`](@ref).
 
 With `durations = [0, 1]` the alignment space is a strict superset of
-vanilla RNN-T's (tokens may also advance time directly). Gradients for **both**
-logit tensors arrive through a ChainRulesCore `rrule` computed inside the
-same forward-backward pass.
+vanilla RNN-T's (tokens may also advance time directly). With
+`durations = [1]` every emission advances time by one frame — equivalent
+to **Monotonic RNN-T** (see [`monotonic_rnnt_loss_batched`](@ref)).
+Gradients for **both** logit tensors arrive through a ChainRulesCore
+`rrule` computed inside the same forward-backward pass.
 """
 function tdt_loss_batched(logits::AbstractArray{T,4},
                           dur_logits::AbstractArray{T,4},
@@ -105,12 +112,34 @@ function tdt_loss_batched(logits::AbstractArray{T,4},
                           input_lengths::Vector{Int},
                           durations::Vector{Int};
                           blank::Int = size(logits, 1),
-                          sigma::Real = 0) where {T}
+                          sigma::Real = 0,
+                          fastemit_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, _, _ = tdt_forward_backward(logits, dur_logits, labels,
                                       target_lengths, input_lengths,
-                                      durations, blank, sigma)
+                                      durations, blank, sigma, fastemit_lambda)
     loss
+end
+
+"""
+    monotonic_rnnt_loss_batched(logits, targets, input_lengths;
+                                blank = size(logits, 1), sigma = 0,
+                                fastemit_lambda = 0)
+
+Batched **Monotonic RNN-T** loss — at most one label per frame, no vertical
+token transitions. Implemented as TDT with `durations = [1]` and a trivial
+duration head (`dur_logits` all zeros ⇒ softmax probability 1). Equivalent
+to restricting the lattice to diagonal label moves plus blank advances.
+"""
+function monotonic_rnnt_loss_batched(logits::AbstractArray{T,4},
+                                     targets::Vector{Vector{Int}},
+                                     input_lengths::Vector{Int};
+                                     blank::Int = size(logits, 1),
+                                     sigma::Real = 0,
+                                     fastemit_lambda::Real = 0) where {T}
+    dur_logits = zeros(T, 1, size(logits, 2), size(logits, 3), size(logits, 4))
+    tdt_loss_batched(logits, dur_logits, targets, input_lengths, [1];
+                     blank, sigma, fastemit_lambda)
 end
 
 function ChainRulesCore.rrule(::typeof(tdt_loss_batched),
@@ -120,12 +149,31 @@ function ChainRulesCore.rrule(::typeof(tdt_loss_batched),
                               input_lengths::Vector{Int},
                               durations::Vector{Int};
                               blank::Int = size(logits, 1),
-                              sigma::Real = 0) where {T}
+                              sigma::Real = 0,
+                              fastemit_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, gtok, gdur = tdt_forward_backward(logits, dur_logits, labels,
                                             target_lengths, input_lengths,
-                                            durations, blank, sigma)
+                                            durations, blank, sigma,
+                                            fastemit_lambda)
     tdt_pullback(Δ) = (NoTangent(), Δ * gtok, Δ * gdur, NoTangent(),
-                       NoTangent(), NoTangent())
+                       NoTangent(), NoTangent(), NoTangent())
     loss, tdt_pullback
+end
+
+function ChainRulesCore.rrule(::typeof(monotonic_rnnt_loss_batched),
+                              logits::AbstractArray{T,4},
+                              targets::Vector{Vector{Int}},
+                              input_lengths::Vector{Int};
+                              blank::Int = size(logits, 1),
+                              sigma::Real = 0,
+                              fastemit_lambda::Real = 0) where {T}
+    dur_logits = zeros(T, 1, size(logits, 2), size(logits, 3), size(logits, 4))
+    labels, target_lengths = pack_transducer_targets(targets, blank)
+    loss, gtok, _ = tdt_forward_backward(logits, dur_logits, labels,
+                                         target_lengths, input_lengths,
+                                         [1], blank, sigma, fastemit_lambda)
+    mono_pullback(Δ) = (NoTangent(), Δ * gtok, NoTangent(), NoTangent(),
+                        NoTangent(), NoTangent(), NoTangent())
+    loss, mono_pullback
 end
