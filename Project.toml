@@ -1,7 +1,7 @@
 name = "TransducerLoss"
 uuid = "3044c044-b2c5-48d8-ac18-c263e713f623"
 authors = ["Mateusz Kaduk <mateusz.kaduk@gmail.com>"]
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 
 [deps]

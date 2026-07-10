@@ -178,3 +178,26 @@ function ref_tdt_label_posts(tok::Array{Float64,3}, dur::Array{Float64,3},
     end
     posts
 end
+
+"HAT reference NLL: per-cell Bernoulli blank + blank-free label softmax."
+function ref_hat_nll(blogit::Array{Float64,2}, ylogit::Array{Float64,3},
+                     target::Vector{Int})
+    T, U1 = size(blogit)
+    U = length(target)
+    lp = logsoftmax_ref(ylogit; dims = 1)
+    em_b = -log1p.(exp.(-blogit))
+    em_l = fill(-Inf, T, U1)
+    for u in 1:U
+        em_l[:, u] .= .-log1p.(exp.(blogit[:, u])) .+ lp[target[u], :, u]
+    end
+    α = fill(-Inf, T, U + 1)
+    α[1, 1] = 0.0
+    for d in 3:(T + U + 1), u in 1:(U + 1)
+        t = d - u
+        1 <= t <= T || continue
+        a = t > 1 ? α[t - 1, u] + em_b[t - 1, u] : -Inf
+        c = u > 1 ? α[t, u - 1] + em_l[t, u - 1] : -Inf
+        α[t, u] = logaddexp(a, c)
+    end
+    -(α[T, U + 1] + em_b[T, U + 1])
+end

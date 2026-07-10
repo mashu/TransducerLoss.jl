@@ -23,3 +23,20 @@ function pack_transducer_targets(targets::Vector{Vector{Int}}, blank::Int)
     end
     labels, target_lengths
 end
+
+"""
+    device_inputs(ref, labels, target_lengths, input_lengths, Tmax)
+
+Move packed labels and per-sample lengths to the device holding `ref`
+(clamping `input_lengths` to `Tmax`). Shared by every loss driver.
+"""
+function device_inputs(ref::AbstractArray, labels::Matrix{Int32},
+                       target_lengths::Vector{Int32},
+                       input_lengths::Vector{Int}, Tmax::Int)
+    B = length(input_lengths)
+    lab_d = copyto!(similar(ref, Int32, size(labels)...), labels)
+    Ul_d  = copyto!(similar(ref, Int32, B), target_lengths)
+    Tl_d  = copyto!(similar(ref, Int32, B),
+                    Int32.(clamp.(input_lengths, 0, Tmax)))
+    lab_d, Ul_d, Tl_d
+end

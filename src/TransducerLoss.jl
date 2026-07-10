@@ -23,6 +23,15 @@ Two losses, one lattice core:
   `durations = [1]` (diagonal-only alignments).
 - **FastEmit** — `fastemit_lambda` on RNN-T and TDT (Yu et al.,
   arXiv:2010.11148); gradient-only latency regularization.
+- **Minimum-latency** — `latency_lambda` on RNN-T (Shinohara & Watanabe,
+  Interspeech 2022): augments the loss with the exact expected label
+  emission frame via a first-moment (expectation-semiring) forward-backward.
+- [`hat_loss_batched`](@ref) — Hybrid Autoregressive Transducer (Variani et
+  al. 2020): Bernoulli blank factorization enabling internal-LM subtraction;
+  reuses the shared lattice kernels with its own emissions and gradient.
+- [`pruned_rnnt_loss_batched`](@ref) + [`pruning_bounds`](@ref) — banded
+  lattice (Kuang et al. 2022): the joint lives on `O(V·T·S·B)` instead of
+  `O(V·T·U·B)`; with a full-width band it equals vanilla RNN-T exactly.
 
 They live in one package deliberately: both operate on the same
 `(t frames, u labels)` lattice and share the emission gather, α
@@ -52,13 +61,22 @@ export pack_transducer_targets,
        rnnt_loss_batched,
        tdt_forward_backward,
        tdt_loss_batched,
-       monotonic_rnnt_loss_batched
+       monotonic_rnnt_loss_batched,
+       hat_forward_backward,
+       hat_loss_batched,
+       pruned_forward_backward,
+       pruned_rnnt_loss_batched,
+       pruning_bounds
 
 include("core/utils.jl")     # logaddexp
 include("core/labels.jl")    # pack_transducer_targets
 include("core/kernels.jl")   # gather, α init, NLL read-out (loss-agnostic)
 include("rnnt/kernels.jl")   # RNN-T diagonal/gradient kernels
 include("rnnt/loss.jl")      # RNN-T driver + API + rrules
+include("hat/kernels.jl")    # HAT gather + factorized gradient
+include("hat/loss.jl")       # HAT driver + API + rrule
+include("pruned/kernels.jl") # banded-lattice column kernels + trivial joint
+include("pruned/loss.jl")    # banded loss, API, pruning_bounds
 include("tdt/kernels.jl")    # TDT diagonal/gradient kernels
 include("tdt/loss.jl")       # TDT driver + API + rrule
 

@@ -34,10 +34,8 @@ function tdt_forward_backward(logits::AbstractArray{T,4},
     λ = T(fastemit_lambda)
     fastemit_lambda >= 0 || throw(ArgumentError("fastemit_lambda must be ≥ 0"))
 
-    clamped = Int32.(clamp.(input_lengths, 0, Tmax))
-    lab_d = copyto!(similar(logits, Int32, size(labels)...), labels)
-    Ul_d  = copyto!(similar(logits, Int32, B), target_lengths)
-    Tl_d  = copyto!(similar(logits, Int32, B), clamped)
+    lab_d, Ul_d, Tl_d = device_inputs(logits, labels, target_lengths,
+                                      input_lengths, Tmax)
     dur_d = copyto!(similar(logits, Int32, length(durations)),
                     Int32.(durations))
 

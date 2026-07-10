@@ -91,4 +91,37 @@
             logits)[1]
         @test g_z ≈ gλ
     end
+    @testset "minimum-latency training" begin
+        V, T, target, blank = 4, 5, [1, 2], 4
+        logits = randn(rng, V, T, 3, 1)
+        λ = 0.3
+        @test rnnt_loss_batched(logits, [target], [T]; latency_lambda = 0) ==
+              rnnt_loss_batched(logits, [target], [T])
+        # loss = nll + λ·E/U, E from the label-posterior reference oracle
+        posts = ref_rnnt_label_posts(logits[:, :, :, 1], target, blank)
+        E_ref = sum(t * post for (t, u, k, post) in posts)
+        nll_ref = ref_rnnt_nll(logits[:, :, :, 1], target, blank)
+        l = rnnt_loss_batched(logits, [target], [T]; latency_lambda = λ)
+        @test l ≈ nll_ref + λ * E_ref / length(target) atol = 1e-8
+        labels, tlens = pack_transducer_targets([target], blank)
+        _, grad = rnnt_forward_backward(logits, labels, tlens, [T], blank,
+                                        0, λ)
+        ε = 1e-6
+        for i in eachindex(logits)
+            p = copy(logits); p[i] += ε
+            m = copy(logits); m[i] -= ε
+            fdv = (rnnt_loss_batched(p, [target], [T]; latency_lambda = λ) -
+                   rnnt_loss_batched(m, [target], [T]; latency_lambda = λ)) / 2ε
+            @test grad[i] ≈ fdv atol = 1e-5
+        end
+        g = Zygote.gradient(
+            l -> rnnt_loss_batched(l, [target], [T]; latency_lambda = λ),
+            logits)[1]
+        @test g ≈ grad
+        # empty target: latency term vanishes exactly
+        @test rnnt_loss_batched(logits, [Int[]], [T]; latency_lambda = λ) ==
+              rnnt_loss_batched(logits, [Int[]], [T])
+        @test_throws ArgumentError rnnt_loss_batched(
+            logits, [target], [T]; latency_lambda = -1)
+    end
 end
