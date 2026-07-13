@@ -88,8 +88,8 @@ end
 
 
 """
-    rnnt_loss_batched(logits, targets, input_lengths [; blank, fastemit_lambda])
-    rnnt_loss_batched(logits, targets, input_lengths, blank [; fastemit_lambda])
+    rnnt_loss_batched(logits, targets, input_lengths [; blank, fastemit_lambda, latency_lambda])
+    rnnt_loss_batched(logits, targets, input_lengths, blank [; fastemit_lambda, latency_lambda])
 
 Batched RNN-T / transducer loss (Graves 2012), mean over batch.
 
@@ -131,7 +131,8 @@ function rnnt_loss_batched(logits::AbstractArray{T,4},
                            targets::Vector{Vector{Int}},
                            input_lengths::Vector{Int},
                            blank::Int;
-                           fastemit_lambda::Real = 0) where {T}
+                           fastemit_lambda::Real = 0,
+                           latency_lambda::Real = 0) where {T}
     rnnt_loss_batched(logits, targets, input_lengths; blank,
                       fastemit_lambda, latency_lambda)
 end
@@ -157,10 +158,12 @@ function ChainRulesCore.rrule(::typeof(rnnt_loss_batched),
                               targets::Vector{Vector{Int}},
                               input_lengths::Vector{Int},
                               blank::Int;
-                              fastemit_lambda::Real = 0) where {T}
+                              fastemit_lambda::Real = 0,
+                              latency_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, grad = rnnt_forward_backward(logits, labels, target_lengths,
-                                       input_lengths, blank, fastemit_lambda)
+                                       input_lengths, blank, fastemit_lambda,
+                                       latency_lambda)
     rnnt_pullback(Δ) = (NoTangent(), Δ * grad, NoTangent(), NoTangent(),
                         NoTangent())
     loss, rnnt_pullback
