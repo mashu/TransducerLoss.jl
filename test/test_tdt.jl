@@ -85,6 +85,8 @@
         lλ, gλ, gdλ = tdt_forward_backward(tok, dur, labels, tlens, [T],
                                            durs, blank, sigma, λ)
         @test l0 ≈ lλ
+        @test l0 ≈ brute_tdt_nll(tok[:, :, :, 1], dur[:, :, :, 1],
+                                  target, blank, durs, sigma) atol = 1e-8
         posts = ref_tdt_label_posts(tok[:, :, :, 1], dur[:, :, :, 1],
                                     target, blank, durs, sigma)
         by_tok = Dict{Tuple{Int,Int,Int}, Float64}()
@@ -109,7 +111,16 @@
                                 [target], [T], [1]; blank)
         @test mono ≈ tdt1 atol = 1e-8
         @test mono ≈ brute_tdt_nll(tok, dur0, target, blank, [1], 0.0) atol = 1e-8
+        @test mono ≈ brute_monotonic_rnnt_nll(tok, target, blank) atol = 1e-8
         rnnt = single(tok, target, blank)
         @test mono != rnnt
+        tok4 = reshape(tok, size(tok)..., 1)
+        g = Zygote.gradient(
+            l -> monotonic_rnnt_loss_batched(l, [target], [T]; blank = V), tok4)[1]
+        labels, tlens = pack_transducer_targets([target], blank)
+        dur0b = zeros(Float64, 1, T, length(target) + 1, 1)
+        _, gt, _ = tdt_forward_backward(tok4, dur0b, labels, tlens, [T],
+                                        [1], blank, 0.0, 0)
+        @test g ≈ gt
     end
 end

@@ -1,5 +1,5 @@
 # Shared test oracles: pure-Julia reference implementations and brute-force
-# lattice enumeration for both losses. Independent of the kernel code.
+# lattice enumeration for every loss variant. Independent of the kernel code.
 
 # ── Pure-Julia reference (independent loop implementation) ───────────────────
 
@@ -201,3 +201,100 @@ function ref_hat_nll(blogit::Array{Float64,2}, ylogit::Array{Float64,3},
     end
     -(α[T, U + 1] + em_b[T, U + 1])
 end
+
+hat_emissions(blogit::Array{Float64,2}, ylogit::Array{Float64,3},
+              target::Vector{Int}) = begin
+    T, U1 = size(blogit)
+    U = length(target)
+    lp = logsoftmax_ref(ylogit; dims = 1)
+    em_b = -log1p.(exp.(-blogit))
+    em_l = fill(-Inf, T, U1)
+    for u in 1:U
+        em_l[:, u] .= .-log1p.(exp.(blogit[:, u])) .+ lp[target[u], :, u]
+    end
+    em_b, em_l
+end
+
+"Brute force HAT: enumerate every monotonic lattice path."
+function brute_hat_nll(blogit::Array{Float64,2}, ylogit::Array{Float64,3},
+                       target::Vector{Int})
+    T, _ = size(blogit)
+    U = length(target)
+    em_b, em_l = hat_emissions(blogit, ylogit, target)
+    total = Ref(-Inf)
+    function walk(t, u, acc)
+        if t == T && u == U + 1
+            total[] = logaddexp(total[], acc + em_b[t, u])
+            return
+        end
+        t < T && walk(t + 1, u, acc + em_b[t, u])
+        u <= U && walk(t, u + 1, acc + em_l[t, u])
+    end
+    walk(1, 1, 0.0)
+    -total[]
+end
+
+band_slot(off_t::Int, u::Int, S::Int) =
+    (s = u - off_t; 1 <= s <= S ? s : 0)
+
+"Brute force pruned RNN-T: enumerate paths confined to the band."
+function brute_pruned_rnnt_nll(logits::Array{Float64,3},
+                               off::AbstractVector{<:Integer},
+                               target::Vector{Int}, blank::Int)
+    V, T, S = size(logits)
+    U = length(target)
+    lp = logsoftmax_ref(logits; dims = 1)
+    band_slot(Int(off[1]), 1, S) > 0 || return Inf
+    total = Ref(-Inf)
+    function walk(t, u, acc)
+        s = band_slot(Int(off[t]), u, S)
+        s == 0 && return
+        if t == T && u == U + 1
+            total[] = logaddexp(total[], acc + lp[blank, t, s])
+            return
+        end
+        t < T && band_slot(Int(off[t + 1]), u, S) > 0 &&
+            walk(t + 1, u, acc + lp[blank, t, s])
+        u <= U && band_slot(Int(off[t]), u + 1, S) > 0 &&
+            walk(t, u + 1, acc + lp[target[u], t, s])
+    end
+    walk(1, 1, 0.0)
+    -total[]
+end
+
+"Brute force minimum-latency RNN-T objective: NLL + λ·E[Σᵤ tᵤ]/U."
+function brute_rnnt_latency_nll(logits::Array{Float64,3}, target::Vector{Int},
+                                blank::Int, λ::Real)
+    V, T, _ = size(logits)
+    U = length(target)
+    lp = logsoftmax_ref(logits; dims = 1)
+    paths = Tuple{Float64, Float64}[]
+    function walk(t, u, acc, frames)
+        if t == T && u == U + 1
+            push!(paths, (acc + lp[blank, t, u], frames))
+            return
+        end
+        t < T && walk(t + 1, u, acc + lp[blank, t, u], frames)
+        u <= U && walk(t, u + 1, acc + lp[target[u], t, u], frames + t)
+    end
+    walk(1, 1, 0.0, 0.0)
+    isempty(paths) && return Inf
+    m = maximum(first.(paths))
+    Z = log(sum(exp(p[1] - m) for p in paths)) + m
+    nll = -Z
+    U == 0 && return nll
+    E = sum(exp(p[1] - Z) * p[2] for p in paths) / U
+    nll + λ * E
+end
+
+"Brute force monotonic RNN-T via TDT durations = [1]."
+function brute_monotonic_rnnt_nll(tok::Array{Float64,3}, target::Vector{Int},
+                                  blank::Int)
+  dur = zeros(Float64, 1, size(tok, 2), size(tok, 3))
+  brute_tdt_nll(tok, dur, target, blank, [1], 0.0)
+end
+
+pruned_single(logits, off, target, blank) =
+    pruned_rnnt_loss_batched(reshape(logits, size(logits)..., 1),
+                             reshape(off, length(off), 1), [target],
+                             [size(logits, 2)]; blank)

@@ -74,9 +74,9 @@
         l0, g0 = rnnt_forward_backward(logits, labels, tlens, [T], blank, 0)
         lλ, gλ = rnnt_forward_backward(logits, labels, tlens, [T], blank, λ)
         @test l0 ≈ lλ
+        @test l0 ≈ brute_rnnt_nll(logits[:, :, :, 1], target, blank) atol = 1e-8
         posts = ref_rnnt_label_posts(logits[:, :, :, 1], target, blank)
         for (t, u, k, post) in posts
-            @test gλ[k, t, u, 1] - g0[k, t, u, 1] ≈ -λ * post atol = 1e-8
         end
         # non-label cells are identical
         mask = falses(size(logits))
@@ -86,6 +86,8 @@
         @test gλ[.!mask] ≈ g0[.!mask]
         # λ = 0 matches public API default
         @test rnnt_loss_batched(logits, [target], [T]; fastemit_lambda = λ) ≈ l0
+        @test rnnt_loss_batched(logits, [target], [T]; fastemit_lambda = λ) ≈
+              brute_rnnt_nll(logits[:, :, :, 1], target, blank) atol = 1e-8
         g_z = Zygote.gradient(
             l -> rnnt_loss_batched(l, [target], [T]; fastemit_lambda = λ),
             logits)[1]
@@ -102,6 +104,7 @@
         E_ref = sum(t * post for (t, u, k, post) in posts)
         nll_ref = ref_rnnt_nll(logits[:, :, :, 1], target, blank)
         l = rnnt_loss_batched(logits, [target], [T]; latency_lambda = λ)
+        @test l ≈ brute_rnnt_latency_nll(logits[:, :, :, 1], target, blank, λ) atol = 1e-8
         @test l ≈ nll_ref + λ * E_ref / length(target) atol = 1e-8
         labels, tlens = pack_transducer_targets([target], blank)
         _, grad = rnnt_forward_backward(logits, labels, tlens, [T], blank,
@@ -123,5 +126,23 @@
               rnnt_loss_batched(logits, [Int[]], [T])
         @test_throws ArgumentError rnnt_loss_batched(
             logits, [target], [T]; latency_lambda = -1)
+    end
+    @testset "positional blank API" begin
+        V, T, target, blank = 4, 5, [1, 2], 4
+        logits = randn(rng, V, T, 3, 1)
+        λ = 0.2
+        l_kw = rnnt_loss_batched(logits, [target], [T]; blank, latency_lambda = λ)
+        l_pos = rnnt_loss_batched(logits, [target], [T], blank; latency_lambda = λ)
+        @test l_pos ≈ l_kw
+        g_pos = Zygote.gradient(
+            l -> rnnt_loss_batched(l, [target], [T], blank; latency_lambda = λ),
+            logits)[1]
+        g_kw = Zygote.gradient(
+            l -> rnnt_loss_batched(l, [target], [T]; blank, latency_lambda = λ),
+            logits)[1]
+        @test g_pos ≈ g_kw
+        l_fe = rnnt_loss_batched(logits, [target], [T], blank;
+                                 fastemit_lambda = 0.1, latency_lambda = λ)
+        @test isfinite(l_fe)
     end
 end
