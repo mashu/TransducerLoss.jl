@@ -1,5 +1,13 @@
 # TDT (Token-and-Duration Transducer) loss: driver and public API.
 
+"""Host duration table: `Vector`/`AbstractVector` or small `NTuple`.
+
+`NTuple` stays on the host under Flux `gpu` / Functors (a `Vector{Int}`
+child would be adapted to `CuArray`). Converted to device `Int32` once
+inside the forward-backward.
+"""
+const DurationSpec = Union{AbstractVector{<:Integer}, NTuple{N,<:Integer} where N}
+
 """
     tdt_forward_backward(logits, dur_logits, labels, target_lengths,
                          input_lengths, durations, blank, sigma)
@@ -13,7 +21,7 @@ function tdt_forward_backward(logits::AbstractArray{T,4},
                               labels::Matrix{Int32},
                               target_lengths::Vector{Int32},
                               input_lengths::Vector{Int},
-                              durations::Vector{Int}, blank::Int,
+                              durations::DurationSpec, blank::Int,
                               sigma::Real, fastemit_lambda::Real) where {T}
     V, Tmax, U1max, B = size(logits)
     size(dur_logits)[2:4] == (Tmax, U1max, B) || throw(ArgumentError(
@@ -36,8 +44,9 @@ function tdt_forward_backward(logits::AbstractArray{T,4},
 
     lab_d, Ul_d, Tl_d = device_inputs(logits, labels, target_lengths,
                                       input_lengths, Tmax)
+    # Host Vector{Int32} then bulk `copyto!` (NTuple→CuArray is scalar indexing).
     dur_d = copyto!(similar(logits, Int32, length(durations)),
-                    Int32.(durations))
+                    collect(Int32, durations))
 
     lp = logsoftmax(logits; dims = 1)
     ld = logsoftmax(dur_logits; dims = 1)
@@ -88,9 +97,11 @@ last token class (the CTCLoss.jl / TransducerLoss.jl convention).
 - `logits`: `(V, T, U+1, B)` raw token-head outputs.
 - `dur_logits`: `(D, T, U+1, B)` raw duration-head outputs, one class per
   entry of `durations`.
-- `durations`: ascending duration set, e.g. `[0, 1, 2, 3, 4]`. Blank
-  transitions use durations ≥ 1; tokens may use 0 (multiple tokens per
-  frame, as in RNN-T). The exit blank lands exactly on frame `T + 1`.
+- `durations`: ascending duration set, e.g. `[0, 1, 2, 3, 4]` or
+  `(0, 1, 2, 3, 4)`. Blank transitions use durations ≥ 1; tokens may use
+  0 (multiple tokens per frame, as in RNN-T). The exit blank lands exactly
+  on frame `T + 1`. Prefer a small `NTuple` in Flux models so `gpu` does
+  not turn the table into a `CuArray`.
 - `sigma`: NeMo's logit under-normalization constant (≈ 0.05 recommended;
   0 disables).
 - `fastemit_lambda`: FastEmit regularization; scales label-emission
@@ -108,7 +119,7 @@ function tdt_loss_batched(logits::AbstractArray{T,4},
                           dur_logits::AbstractArray{T,4},
                           targets::Vector{Vector{Int}},
                           input_lengths::Vector{Int},
-                          durations::Vector{Int};
+                          durations::DurationSpec;
                           blank::Int = size(logits, 1),
                           sigma::Real = 0,
                           fastemit_lambda::Real = 0) where {T}
@@ -136,7 +147,7 @@ function monotonic_rnnt_loss_batched(logits::AbstractArray{T,4},
                                      sigma::Real = 0,
                                      fastemit_lambda::Real = 0) where {T}
     dur_logits = zeros(T, 1, size(logits, 2), size(logits, 3), size(logits, 4))
-    tdt_loss_batched(logits, dur_logits, targets, input_lengths, [1];
+    tdt_loss_batched(logits, dur_logits, targets, input_lengths, (1,);
                      blank, sigma, fastemit_lambda)
 end
 
@@ -145,7 +156,7 @@ function ChainRulesCore.rrule(::typeof(tdt_loss_batched),
                               dur_logits::AbstractArray{T,4},
                               targets::Vector{Vector{Int}},
                               input_lengths::Vector{Int},
-                              durations::Vector{Int};
+                              durations::DurationSpec;
                               blank::Int = size(logits, 1),
                               sigma::Real = 0,
                               fastemit_lambda::Real = 0) where {T}
@@ -170,7 +181,7 @@ function ChainRulesCore.rrule(::typeof(monotonic_rnnt_loss_batched),
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, gtok, _ = tdt_forward_backward(logits, dur_logits, labels,
                                          target_lengths, input_lengths,
-                                         [1], blank, sigma, fastemit_lambda)
+                                         (1,), blank, sigma, fastemit_lambda)
     mono_pullback(Δ) = (NoTangent(), Δ * gtok, NoTangent(), NoTangent(),
                         NoTangent(), NoTangent(), NoTangent())
     loss, mono_pullback
