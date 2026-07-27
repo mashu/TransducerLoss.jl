@@ -32,7 +32,8 @@ grad = Zygote.gradient(l -> rnnt_loss_batched(l, targets, input_lengths), logits
 | FastEmit (Yu et al. 2021) | `fastemit_lambda` on RNN-T/TDT | gradient-level emission regularization |
 | Minimum-latency (Shinohara & Watanabe 2022) | `latency_lambda` on RNN-T | exact expected emission frame via a first-moment forward-backward; FD-verified |
 | HAT (Variani et al. 2020) | `hat_loss_batched` | Bernoulli blank factorization → internal-LM subtraction for principled LM fusion |
-| Banded / pruned lattice (Kuang et al. 2022) | `pruned_rnnt_loss_batched` + `pruning_bounds` | `O(V·T·S·B)` joint; full-width band equals vanilla RNN-T; bounds are k2-inspired (posterior-centred, not bit-compatible) |
+| Banded / pruned RNN-T (Kuang et al. 2022) | `pruned_rnnt_loss_batched` + `pruning_bounds` | `O(V·T·S·B)` joint; full-width band equals vanilla RNN-T; bounds are k2-inspired (posterior-centred, not bit-compatible) |
+| Banded / pruned TDT | `pruned_tdt_loss_batched` + `tdt_pruning_bounds` | Same banding for TDT (incl. FastEmit); bounds from the **TDT** lattice (occupancy-centred), not RNN-T's |
 | Multi-blank (Xu et al., ICASSP 2023) | subsumed | superseded by TDT's duration head |
 
 Gradients are analytic and verified in `test/` against brute-force path enumeration

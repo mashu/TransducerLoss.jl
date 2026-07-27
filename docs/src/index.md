@@ -23,6 +23,7 @@ tensors**. You pass those tensors here:
 | Token head + duration head | [`tdt_loss_batched`](@ref) |
 | Label head + blank head | [`hat_loss_batched`](@ref) |
 | Banded joint `(V, T, S, B)` + offsets | [`pruned_rnnt_loss_batched`](@ref) |
+| Banded token + duration heads + offsets | [`pruned_tdt_loss_batched`](@ref) |
 
 TDT and HAT correspond to architectures with **multiple output heads**, but
 TransducerLoss only implements the **loss computation** on their logits — not

@@ -12,7 +12,8 @@ point is a **loss function** on logits your model already computed.
 | **Monotonic RNN-T** | [`monotonic_rnnt_loss_batched`](@ref) | `logits` `(V, T, U+1, B)` | At most one label per frame; RNA / diagonal-only alignments | Restricts lattice to diagonal moves (TDT with `durations = [1]`) |
 | **HAT** | [`hat_loss_batched`](@ref) | `label_logits` `(V, T, U+1, B)` + `blank_logits` `(T, U+1, B)` — **blank-free** `V` | LM fusion with internal-LM subtraction; production shallow-fusion setups | Factorized blank enables principled LM combination (Variani et al., ICASSP 2020) |
 | **Pruned RNN-T** | [`pruned_rnnt_loss_batched`](@ref) + [`pruning_bounds`](@ref) | `pruned_logits` `(V, T, S, B)` + `band_offsets` `(T, B)`; bounds helper takes `am` `(V, T, B)` + `lm` `(V, U+1, B)` | Long utterances where full `O(V·T·U·B)` joint does not fit in memory | Banded lattice matches vanilla RNN-T when band is wide enough (Kuang et al., Interspeech 2022) |
-| **FastEmit** | `fastemit_lambda` on RNN-T / TDT | Same as parent variant | Reduce emission latency at decode time | Gradient-only regularization; loss scalar unchanged (Yu et al., arXiv:2010.11148) |
+| **Pruned TDT** | [`pruned_tdt_loss_batched`](@ref) + [`tdt_pruning_bounds`](@ref) | Token `(V, T, S, B)` + duration `(D, T, S, B)` + `band_offsets` `(T, B)`; bounds helper also takes `am_dur` `(D, T, B)` + `lm_dur` `(D, U+1, B)` | Same memory bottleneck as pruned RNN-T, but for duration-head models | Banding for TDT; bounds use the TDT lattice (occupancy), not RNN-T's |
+| **FastEmit** | `fastemit_lambda` on RNN-T / TDT / pruned TDT | Same as parent variant | Reduce emission latency at decode time | Gradient-only regularization; loss scalar unchanged (Yu et al., arXiv:2010.11148) |
 | **Minimum-latency** | `latency_lambda` on RNN-T only | Same as RNN-T | Penalize late label emissions during training | Adds exact expected emission frame to the objective (Shinohara & Watanabe, Interspeech 2022) |
 
 ### Tensor shape legend
@@ -33,7 +34,10 @@ a value `≥ 1`. Blank transitions use durations `≥ 1`; tokens may use `d = 0`
 **Pruned extras:** `band_offsets` must be monotone per sample with
 `band_offsets[1, b] == 0`. [`pruning_bounds`](@ref) estimates offsets from
 trivial-joint posteriors (k2-inspired, not bit-compatible with k2's
-gradient-based bounds).
+gradient-based bounds). [`tdt_pruning_bounds`](@ref) does the same on the
+**TDT** lattice, centring on cell occupancy rather than label-emission
+posterior — frame-skipping blanks move mass, so RNN-T bounds are the wrong
+estimator for TDT.
 
 ## Typical use-cases
 
@@ -58,9 +62,15 @@ joint tensor is too large. Use [`pruning_bounds`](@ref) to get `band_offsets`,
 gather logits into `(V, T, S, B)`, then call [`pruned_rnnt_loss_batched`](@ref).
 With `S = U + 1` and zero offsets the loss equals vanilla RNN-T exactly.
 
-**Add `fastemit_lambda`** (RNN-T or TDT) when decode latency is too high —
-scales label-emission gradients by `(1 + λ)` without changing the reported NLL.
-Typical values are small (e.g. `0.004`).
+**Pick Pruned TDT** for the same memory reason when the model has a duration
+head. Use [`tdt_pruning_bounds`](@ref) (not RNN-T's helper), gather both
+token and duration logits onto the band, then call
+[`pruned_tdt_loss_batched`](@ref). Full-width band equals [`tdt_loss_batched`](@ref);
+FastEmit works on the banded path.
+
+**Add `fastemit_lambda`** (RNN-T, TDT, or pruned TDT) when decode latency is
+too high — scales label-emission gradients by `(1 + λ)` without changing the
+reported NLL. Typical values are small (e.g. `0.004`).
 
 **Add `latency_lambda`** (RNN-T only) when you want the loss itself to penalize
 late emissions via the alignment posterior's expected frame index.
@@ -76,9 +86,9 @@ late emissions via the alignment posterior's expected frame index.
 ## Memory
 
 Vanilla RNN-T, TDT, and HAT materialize `O(T · U · B)` lattice state and consume
-`O(V · T · U · B)` joint logits. Pruned RNN-T bounds the joint to
-`O(V · T · S · B)` with `S ≪ U`. Shorter training windows or smaller batches
-help when memory is tight.
+`O(V · T · U · B)` joint logits. Pruned RNN-T / TDT bound the joint to
+`O(V · T · S · B)` (plus `O(D · T · S · B)` duration logits for TDT) with
+`S ≪ U`. Shorter training windows or smaller batches help when memory is tight.
 
 ## Automatic differentiation
 

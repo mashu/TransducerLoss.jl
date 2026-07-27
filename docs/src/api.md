@@ -12,6 +12,7 @@ tdt_loss_batched
 monotonic_rnnt_loss_batched
 hat_loss_batched
 pruned_rnnt_loss_batched
+pruned_tdt_loss_batched
 ```
 
 ## Helpers
@@ -19,6 +20,7 @@ pruned_rnnt_loss_batched
 ```@docs
 pack_transducer_targets
 pruning_bounds
+tdt_pruning_bounds
 ```
 
 ## Internal (advanced)
@@ -40,7 +42,9 @@ TransducerLoss.logaddexp
 | `monotonic_rnnt_loss_batched` | Monotonic RNN-T via TDT with `durations = [1]` |
 | `hat_loss_batched` | Hybrid Autoregressive Transducer with Bernoulli blank factorization |
 | `pruned_rnnt_loss_batched` | RNN-T on a banded lattice; full-width band equals vanilla RNN-T |
+| `pruned_tdt_loss_batched` | TDT on a banded lattice; full-width band equals vanilla TDT |
 | `pruning_bounds` | Estimate band offsets from trivial-joint label posteriors |
+| `tdt_pruning_bounds` | Estimate band offsets on the TDT lattice (occupancy-centred) |
 | `pack_transducer_targets` | Pack ragged label sequences into a padded matrix |
 | `rnnt_forward_backward` | Internal RNN-T forward-backward; returns `(loss, grad)` |
 | `tdt_forward_backward` | Internal TDT forward-backward; returns `(loss, grad_tok, grad_dur)` |

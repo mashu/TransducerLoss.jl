@@ -54,6 +54,19 @@ offsets = pruning_bounds(am, lm, targets, input_lengths; band_width = 4)
 # offsets: (T, B) Int matrix; cell u = offsets[t, b] + s for s in 1:S
 ```
 
+## Pruned TDT
+
+```julia
+# Bounds from the TDT lattice (occupancy), not RNN-T's
+offsets = tdt_pruning_bounds(am, lm, am_dur, lm_dur, targets, input_lengths;
+                             band_width = 4, durations)
+
+# Banded token (V, T, S, B) + duration (D, T, S, B) logits
+loss = pruned_tdt_loss_batched(pruned_logits, pruned_dur_logits, offsets,
+                               targets, input_lengths, durations;
+                               sigma = 0.05)
+```
+
 ## Regularization
 
 ```julia
