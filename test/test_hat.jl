@@ -5,7 +5,7 @@
             for _ in 1:2
                 blog = randn(rng, T, length(target) + 1) .* 2
                 ylog = randn(rng, V, T, length(target) + 1) .* 2
-                l = hat_loss_batched(reshape(ylog, size(ylog)..., 1),
+                l = hat_loss(reshape(ylog, size(ylog)..., 1),
                                      reshape(blog, size(blog)..., 1),
                                      [target], [T])
                 @test l ≈ brute_hat_nll(blog, ylog, target) atol = 1e-8
@@ -23,19 +23,19 @@
         for i in eachindex(ylog)
             p = copy(ylog); p[i] += ε
             m = copy(ylog); m[i] -= ε
-            fdv = (hat_loss_batched(p, blog, [target], [T]) -
-                   hat_loss_batched(m, blog, [target], [T])) / 2ε
+            fdv = (hat_loss(p, blog, [target], [T]) -
+                   hat_loss(m, blog, [target], [T])) / 2ε
             @test gy[i] ≈ fdv atol = 1e-5
         end
         for i in eachindex(blog)
             p = copy(blog); p[i] += ε
             m = copy(blog); m[i] -= ε
-            fdv = (hat_loss_batched(ylog, p, [target], [T]) -
-                   hat_loss_batched(ylog, m, [target], [T])) / 2ε
+            fdv = (hat_loss(ylog, p, [target], [T]) -
+                   hat_loss(ylog, m, [target], [T])) / 2ε
             @test gb[i] ≈ fdv atol = 1e-5
         end
         g1, g2 = Zygote.gradient(
-            (a, b) -> hat_loss_batched(a, b, [target], [T]), ylog, blog)
+            (a, b) -> hat_loss(a, b, [target], [T]), ylog, blog)
         @test g1 ≈ gy
         @test g2 ≈ gb
     end
@@ -46,8 +46,8 @@
         V = 3
         ylog = randn(rng, V, maximum(lens), U1, 3)
         blog = randn(rng, maximum(lens), U1, 3)
-        batched = hat_loss_batched(ylog, blog, targets, lens)
-        singles = [hat_loss_batched(
+        batched = hat_loss(ylog, blog, targets, lens)
+        singles = [hat_loss(
             ylog[:, 1:lens[b], 1:length(targets[b]) + 1, b:b],
             blog[1:lens[b], 1:length(targets[b]) + 1, b:b],
             [targets[b]], [lens[b]]) for b in 1:3]
@@ -56,7 +56,7 @@
     @testset "argument validation" begin
         ylog = randn(rng, 3, 4, 3, 1)
         blog = randn(rng, 4, 3, 1)
-        @test_throws ArgumentError hat_loss_batched(ylog, blog[:, 1:2, :],
+        @test_throws ArgumentError hat_loss(ylog, blog[:, 1:2, :],
                                                     [[1, 2]], [4])
         @test_throws ArgumentError pack_transducer_targets([[0]], 0)
     end

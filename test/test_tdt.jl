@@ -30,15 +30,15 @@
         for i in eachindex(t4)
             p = copy(t4); p[i] += ε
             m = copy(t4); m[i] -= ε
-            fd = (tdt_loss_batched(p, d4, [target], [T], durs; blank, sigma) -
-                  tdt_loss_batched(m, d4, [target], [T], durs; blank, sigma)) / 2ε
+            fd = (tdt_loss(p, d4, [target], [T], durs; blank, sigma) -
+                  tdt_loss(m, d4, [target], [T], durs; blank, sigma)) / 2ε
             @test gtok[i] ≈ fd atol = 1e-5
         end
         for i in eachindex(d4)
             p = copy(d4); p[i] += ε
             m = copy(d4); m[i] -= ε
-            fd = (tdt_loss_batched(t4, p, [target], [T], durs; blank, sigma) -
-                  tdt_loss_batched(t4, m, [target], [T], durs; blank, sigma)) / 2ε
+            fd = (tdt_loss(t4, p, [target], [T], durs; blank, sigma) -
+                  tdt_loss(t4, m, [target], [T], durs; blank, sigma)) / 2ε
             @test gdur[i] ≈ fd atol = 1e-5
         end
     end
@@ -49,7 +49,7 @@
         targets = [[1, 2], [3]]
         lens = [5, 4]
         gt, gd = Zygote.gradient(
-            (a, b) -> tdt_loss_batched(a, b, targets, lens, durs;
+            (a, b) -> tdt_loss(a, b, targets, lens, durs;
                                        blank = 4, sigma = 0.05),
             tok, dur)
         labels, tlens = pack_transducer_targets(targets, 4)
@@ -62,15 +62,15 @@
         singles = [tdt_single(Float64.(tok[:, 1:lens[b], 1:length(targets[b]) + 1, b]),
                               Float64.(dur[:, 1:lens[b], 1:length(targets[b]) + 1, b]),
                               targets[b], 4, durs; sigma = 0.05) for b in 1:2]
-        batched = tdt_loss_batched(tok, dur, targets, lens, durs;
+        batched = tdt_loss(tok, dur, targets, lens, durs;
                                    blank = 4, sigma = 0.05)
         @test batched ≈ sum(singles) / 2 atol = 1e-4   # Float32 tensors
 
-        @test_throws ArgumentError tdt_loss_batched(tok, dur, targets, lens,
+        @test_throws ArgumentError tdt_loss(tok, dur, targets, lens,
                                                     [2, 1]; blank = 4)      # unsorted
-        @test_throws ArgumentError tdt_loss_batched(tok, dur, targets, lens,
+        @test_throws ArgumentError tdt_loss(tok, dur, targets, lens,
                                                     [0]; blank = 4)          # no d ≥ 1
-        @test_throws ArgumentError tdt_loss_batched(tok, dur[:, 1:3, :, :],
+        @test_throws ArgumentError tdt_loss(tok, dur[:, 1:3, :, :],
                                                     targets, lens, durs;
                                                     blank = 4)               # (T,U+1,B) mismatch
     end
@@ -104,9 +104,9 @@
         blank = V
         tok = randn(rng, V, T, length(target) + 1)
         dur0 = zeros(Float64, 1, T, length(target) + 1)
-        mono = monotonic_rnnt_loss_batched(reshape(tok, size(tok)..., 1),
+        mono = monotonic_rnnt_loss(reshape(tok, size(tok)..., 1),
                                            [target], [T]; blank)
-        tdt1 = tdt_loss_batched(reshape(tok, size(tok)..., 1),
+        tdt1 = tdt_loss(reshape(tok, size(tok)..., 1),
                                 reshape(dur0, size(dur0)..., 1),
                                 [target], [T], [1]; blank)
         @test mono ≈ tdt1 atol = 1e-8
@@ -116,7 +116,7 @@
         @test mono != rnnt
         tok4 = reshape(tok, size(tok)..., 1)
         g = Zygote.gradient(
-            l -> monotonic_rnnt_loss_batched(l, [target], [T]; blank = V), tok4)[1]
+            l -> monotonic_rnnt_loss(l, [target], [T]; blank = V), tok4)[1]
         labels, tlens = pack_transducer_targets([target], blank)
         dur0b = zeros(Float64, 1, T, length(target) + 1, 1)
         _, gt, _ = tdt_forward_backward(tok4, dur0b, labels, tlens, [T],

@@ -19,11 +19,11 @@ tensors**. You pass those tensors here:
 
 | Your model produces | You call |
 |---------------------|----------|
-| One joint logit tensor `(V, T, U+1, B)` | [`rnnt_loss_batched`](@ref) |
-| Token head + duration head | [`tdt_loss_batched`](@ref) |
-| Label head + blank head | [`hat_loss_batched`](@ref) |
-| Banded joint `(V, T, S, B)` + offsets | [`pruned_rnnt_loss_batched`](@ref) |
-| Banded token + duration heads + offsets | [`pruned_tdt_loss_batched`](@ref) |
+| One joint logit tensor `(V, T, U+1, B)` | [`rnnt_loss`](@ref) |
+| Token head + duration head | [`tdt_loss`](@ref) |
+| Label head + blank head | [`hat_loss`](@ref) |
+| Banded joint `(V, T, S, B)` + offsets | [`pruned_rnnt_loss`](@ref) |
+| Banded token + duration heads + offsets | [`pruned_tdt_loss`](@ref) |
 
 TDT and HAT correspond to architectures with **multiple output heads**, but
 TransducerLoss only implements the **loss computation** on their logits — not

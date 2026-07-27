@@ -78,9 +78,11 @@ function pruned_tdt_forward_backward(logits::AbstractArray{T,4},
 end
 
 """
-    pruned_tdt_loss_batched(logits, dur_logits, band_offsets, targets,
-                            input_lengths, durations; blank, sigma,
-                            fastemit_lambda)
+    pruned_tdt_loss(logits, dur_logits, band_offsets, targets,
+                    input_lengths, durations; blank, sigma,
+                    fastemit_lambda)
+    pruned_tdt_loss(logits, dur_logits, band_offsets, target, durations;
+                    input_length, blank, sigma, fastemit_lambda)
 
 **Token-and-Duration Transducer loss on a banded lattice** — pruning (Kuang
 et al., Interspeech 2022, arXiv:2206.13236) applied to TDT (Xu et al., ICML
@@ -93,31 +95,30 @@ width, batch size, utterance length — is a constant factor on a tensor that
 is quadratic in the lattice; banding attacks the lattice itself. At a band of
 5 against 160 label positions it is a ~32× cut.
 
-- `logits`: `(V, T, S, B)` raw token-head outputs on band cells.
-- `dur_logits`: `(D, T, S, B)` raw duration-head outputs on the same cells.
-- `band_offsets`: `(T, B)`, monotone non-decreasing per sample with
-  `band_offsets[1, b] == 0`. Get them from [`tdt_pruning_bounds`](@ref).
+- Batched: `logits` `(V, T, S, B)`, `dur_logits` `(D, T, S, B)`,
+  `band_offsets` `(T, B)`.
+- Single-sample: drop the batch axis; `band_offsets` is length `T`.
 - `durations`, `blank`, `sigma`, `fastemit_lambda`: as
-  [`tdt_loss_batched`](@ref). FastEmit works here — it is a reweighting of
+  [`tdt_loss`](@ref). FastEmit works here — it is a reweighting of
   the token-departure gradient, which is a per-cell quantity, so banding
   does not interfere with it.
 
-With `S = U + 1` and zero offsets this is **exactly** [`tdt_loss_batched`](@ref);
+With `S = U + 1` and zero offsets this is **exactly** [`tdt_loss`](@ref);
 the test suite asserts that equality on both the loss and both gradients.
 
 Alignments that leave the band are dropped, so the returned value is an
 upper bound on the true NLL. A band chosen by [`tdt_pruning_bounds`](@ref)
 keeps essentially all of the mass; a hand-picked one may not.
 """
-function pruned_tdt_loss_batched(logits::AbstractArray{T,4},
-                                 dur_logits::AbstractArray{T,4},
-                                 band_offsets::AbstractMatrix{<:Integer},
-                                 targets::Vector{Vector{Int}},
-                                 input_lengths::Vector{Int},
-                                 durations::DurationSpec;
-                                 blank::Int = size(logits, 1),
-                                 sigma::Real = 0,
-                                 fastemit_lambda::Real = 0) where {T}
+function pruned_tdt_loss(logits::AbstractArray{T,4},
+                         dur_logits::AbstractArray{T,4},
+                         band_offsets::AbstractMatrix{<:Integer},
+                         targets::Vector{Vector{Int}},
+                         input_lengths::Vector{Int},
+                         durations::DurationSpec;
+                         blank::Int = size(logits, 1),
+                         sigma::Real = 0,
+                         fastemit_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, _, _ = pruned_tdt_forward_backward(logits, dur_logits,
                                              Int32.(Matrix(band_offsets)),
@@ -127,7 +128,23 @@ function pruned_tdt_loss_batched(logits::AbstractArray{T,4},
     loss
 end
 
-function ChainRulesCore.rrule(::typeof(pruned_tdt_loss_batched),
+function pruned_tdt_loss(logits::AbstractArray{T,3},
+                         dur_logits::AbstractArray{T,3},
+                         band_offsets::AbstractVector{<:Integer},
+                         target::Vector{Int},
+                         durations::DurationSpec;
+                         input_length::Int = size(logits, 2),
+                         blank::Int = size(logits, 1),
+                         sigma::Real = 0,
+                         fastemit_lambda::Real = 0) where {T}
+    pruned_tdt_loss(reshape(logits, size(logits)..., 1),
+                    reshape(dur_logits, size(dur_logits)..., 1),
+                    reshape(band_offsets, length(band_offsets), 1),
+                    [target], [input_length], durations;
+                    blank, sigma, fastemit_lambda)
+end
+
+function ChainRulesCore.rrule(::typeof(pruned_tdt_loss),
                               logits::AbstractArray{T,4},
                               dur_logits::AbstractArray{T,4},
                               band_offsets::AbstractMatrix{<:Integer},

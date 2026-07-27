@@ -52,8 +52,9 @@ function pruned_forward_backward(logits::AbstractArray{T,4},
 end
 
 """
-    pruned_rnnt_loss_batched(logits, band_offsets, targets, input_lengths;
-                             blank = size(logits, 1))
+    pruned_rnnt_loss(logits, band_offsets, targets, input_lengths;
+                     blank = size(logits, 1))
+    pruned_rnnt_loss(logits, band_offsets, target; input_length, blank)
 
 RNN-T loss on a **banded lattice** — the memory-critical core of the pruned
 transducer (Kuang et al., Interspeech 2022, arXiv:2206.13236). The joint is
@@ -61,16 +62,19 @@ evaluated only on `S = size(logits, 3)` cells per frame, at lattice
 positions `u = band_offsets[t, b] + s`; alignments are confined to the band,
 so the joint tensor shrinks from `O(V·T·U·B)` to `O(V·T·S·B)`.
 
+Batched `logits` are `(V, T, S, B)` with `band_offsets` `(T, B)`;
+single-sample forms are `(V, T, S)` with a length-`T` offset vector.
+
 Offsets must be monotone non-decreasing per sample with
 `band_offsets[1, b] == 0`; obtain them from [`pruning_bounds`](@ref) (or any
 alignment source). With `S = U + 1` and zero offsets this is *exactly* the
 full RNN-T loss — the test suite asserts that equality.
 """
-function pruned_rnnt_loss_batched(logits::AbstractArray{T,4},
-                                  band_offsets::AbstractMatrix{<:Integer},
-                                  targets::Vector{Vector{Int}},
-                                  input_lengths::Vector{Int};
-                                  blank::Int = size(logits, 1)) where {T}
+function pruned_rnnt_loss(logits::AbstractArray{T,4},
+                          band_offsets::AbstractMatrix{<:Integer},
+                          targets::Vector{Vector{Int}},
+                          input_lengths::Vector{Int};
+                          blank::Int = size(logits, 1)) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, _ = pruned_forward_backward(logits, Int32.(Matrix(band_offsets)),
                                       labels, target_lengths, input_lengths,
@@ -78,7 +82,17 @@ function pruned_rnnt_loss_batched(logits::AbstractArray{T,4},
     loss
 end
 
-function ChainRulesCore.rrule(::typeof(pruned_rnnt_loss_batched),
+function pruned_rnnt_loss(logits::AbstractArray{T,3},
+                          band_offsets::AbstractVector{<:Integer},
+                          target::Vector{Int};
+                          input_length::Int = size(logits, 2),
+                          blank::Int = size(logits, 1)) where {T}
+    pruned_rnnt_loss(reshape(logits, size(logits)..., 1),
+                     reshape(band_offsets, length(band_offsets), 1),
+                     [target], [input_length]; blank)
+end
+
+function ChainRulesCore.rrule(::typeof(pruned_rnnt_loss),
                               logits::AbstractArray{T,4},
                               band_offsets::AbstractMatrix{<:Integer},
                               targets::Vector{Vector{Int}},

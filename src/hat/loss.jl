@@ -53,14 +53,15 @@ function hat_forward_backward(label_logits::AbstractArray{T,4},
 end
 
 """
-    hat_loss_batched(label_logits, blank_logits, targets, input_lengths)
+    hat_loss(label_logits, blank_logits, targets, input_lengths)
+    hat_loss(label_logits, blank_logits, target; input_length)
 
 **Hybrid Autoregressive Transducer** loss (Variani et al., ICASSP 2020,
 arXiv:2003.07705). Blank is factorized out as a per-cell Bernoulli:
 `P(blank) = σ(blank_logits[t,u,b])`, and labels share
 `(1 − σ) · softmax(label_logits)` over a **blank-free** vocabulary — so
-`label_logits` is `(V, T, U+1, B)` with all `V` classes real labels, and
-`blank_logits` is `(T, U+1, B)`.
+batched `label_logits` is `(V, T, U+1, B)` with all `V` classes real labels,
+and `blank_logits` is `(T, U+1, B)`. Single-sample forms drop the batch axis.
 
 The payoff is principled language-model fusion: because the label
 distribution is a proper conditional LM given "not blank", the model's
@@ -69,17 +70,26 @@ contribution zeroed) and subtracted before adding an external LM — the
 production-grade alternative to plain shallow fusion. Gradients for both
 tensors arrive via one ChainRulesCore `rrule`.
 """
-function hat_loss_batched(label_logits::AbstractArray{T,4},
-                          blank_logits::AbstractArray{T,3},
-                          targets::Vector{Vector{Int}},
-                          input_lengths::Vector{Int}) where {T}
+function hat_loss(label_logits::AbstractArray{T,4},
+                  blank_logits::AbstractArray{T,3},
+                  targets::Vector{Vector{Int}},
+                  input_lengths::Vector{Int}) where {T}
     labels, target_lengths = pack_transducer_targets(targets, 0)  # no blank id
     loss, _, _ = hat_forward_backward(label_logits, blank_logits, labels,
                                       target_lengths, input_lengths)
     loss
 end
 
-function ChainRulesCore.rrule(::typeof(hat_loss_batched),
+function hat_loss(label_logits::AbstractArray{T,3},
+                  blank_logits::AbstractArray{T,2},
+                  target::Vector{Int};
+                  input_length::Int = size(label_logits, 2)) where {T}
+    hat_loss(reshape(label_logits, size(label_logits)..., 1),
+             reshape(blank_logits, size(blank_logits)..., 1),
+             [target], [input_length])
+end
+
+function ChainRulesCore.rrule(::typeof(hat_loss),
                               label_logits::AbstractArray{T,4},
                               blank_logits::AbstractArray{T,3},
                               targets::Vector{Vector{Int}},

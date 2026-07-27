@@ -6,8 +6,8 @@
         U1 = maximum(length, targets) + 1
         logits = randn(rng, V, T, U1, 2)
         off = zeros(Int, T, 2)
-        @test pruned_rnnt_loss_batched(logits, off, targets, lens) ≈
-              rnnt_loss_batched(logits, targets, lens) atol = 1e-10
+        @test pruned_rnnt_loss(logits, off, targets, lens) ≈
+              rnnt_loss(logits, targets, lens) atol = 1e-10
         for (target, Tlen) in zip(targets, lens)
             lb = logits[:, 1:Tlen, 1:length(target) + 1, 1]
             off1 = zeros(Int, Tlen)
@@ -19,9 +19,9 @@
                   brute_rnnt_nll(lb, target, V) atol = 1e-8
         end
         gp = Zygote.gradient(
-            l -> pruned_rnnt_loss_batched(l, off, targets, lens), logits)[1]
+            l -> pruned_rnnt_loss(l, off, targets, lens), logits)[1]
         gf = Zygote.gradient(
-            l -> rnnt_loss_batched(l, targets, lens), logits)[1]
+            l -> rnnt_loss(l, targets, lens), logits)[1]
         @test gp ≈ gf atol = 1e-10
     end
     @testset "shifted band: loss vs brute force" begin
@@ -47,19 +47,19 @@
         for i in eachindex(lb)
             p = copy(lb); p[i] += ε
             m = copy(lb); m[i] -= ε
-            fdv = (pruned_rnnt_loss_batched(p, offm, [target], [T]) -
-                   pruned_rnnt_loss_batched(m, offm, [target], [T])) / 2ε
+            fdv = (pruned_rnnt_loss(p, offm, [target], [T]) -
+                   pruned_rnnt_loss(m, offm, [target], [T])) / 2ε
             @test grad[i] ≈ fdv atol = 1e-5
         end
         g = Zygote.gradient(
-            l -> pruned_rnnt_loss_batched(l, offm, [target], [T]), lb)[1]
+            l -> pruned_rnnt_loss(l, offm, [target], [T]), lb)[1]
         @test g ≈ grad
     end
     @testset "offset validation & pruning_bounds" begin
         lb = randn(rng, 4, 4, 2, 1)
-        @test_throws ArgumentError pruned_rnnt_loss_batched(
+        @test_throws ArgumentError pruned_rnnt_loss(
             lb, reshape([1, 1, 1, 1], :, 1), [[1]], [4])   # start not in band
-        @test_throws ArgumentError pruned_rnnt_loss_batched(
+        @test_throws ArgumentError pruned_rnnt_loss(
             lb, reshape([0, 1, 0, 1], :, 1), [[1]], [4])   # not monotone
         am = randn(rng, 4, 6, 1)
         lm = randn(rng, 4, 4, 1)
@@ -69,7 +69,7 @@
         @test all(diff(off[:, 1]) .<= 3)                      # slope ≤ w − 1
         @test off[6, 1] + 4 >= 2 + 1                          # exit reachable
         joint = randn(rng, 4, 6, 4, 1)
-        l = pruned_rnnt_loss_batched(joint, off, [[1, 2]], [6])
+        l = pruned_rnnt_loss(joint, off, [[1, 2]], [6])
         @test isfinite(l)
         @test l ≈ brute_pruned_rnnt_nll(joint[:, :, :, 1], Vector(off[:, 1]),
                                         [1, 2], 4) atol = 1e-8
@@ -82,8 +82,8 @@
         S = U1
         logits = randn(rng, V, maximum(lens), S, 2)
         off = zeros(Int, maximum(lens), 2)
-        batched = pruned_rnnt_loss_batched(logits, off, targets, lens; blank)
-        singles = [pruned_rnnt_loss_batched(
+        batched = pruned_rnnt_loss(logits, off, targets, lens; blank)
+        singles = [pruned_rnnt_loss(
             logits[:, 1:lens[b], :, b:b], off[1:lens[b], b:b],
             [targets[b]], [lens[b]]; blank) for b in 1:2]
         @test batched ≈ sum(singles) / 2 atol = 1e-8
@@ -110,14 +110,14 @@ end
         dur = randn(rng, length(durs), T, U1, 2)
         off = zeros(Int, T, 2)
         for σ in (0.0, 0.05), λ in (0.0, 0.1)
-            @test pruned_tdt_loss_batched(tok, dur, off, targets, lens, durs;
+            @test pruned_tdt_loss(tok, dur, off, targets, lens, durs;
                                           sigma = σ, fastemit_lambda = λ) ≈
-                  tdt_loss_batched(tok, dur, targets, lens, durs;
+                  tdt_loss(tok, dur, targets, lens, durs;
                                    sigma = σ, fastemit_lambda = λ) atol = 1e-10
-            gp = Zygote.gradient((a, b) -> pruned_tdt_loss_batched(
+            gp = Zygote.gradient((a, b) -> pruned_tdt_loss(
                 a, b, off, targets, lens, durs; sigma = σ, fastemit_lambda = λ),
                 tok, dur)
-            gf = Zygote.gradient((a, b) -> tdt_loss_batched(
+            gf = Zygote.gradient((a, b) -> tdt_loss(
                 a, b, targets, lens, durs; sigma = σ, fastemit_lambda = λ),
                 tok, dur)
             @test gp[1] ≈ gf[1] atol = 1e-10

@@ -88,16 +88,18 @@ end
 
 
 """
-    rnnt_loss_batched(logits, targets, input_lengths [; blank, fastemit_lambda, latency_lambda])
-    rnnt_loss_batched(logits, targets, input_lengths, blank [; fastemit_lambda, latency_lambda])
+    rnnt_loss(logits, targets, input_lengths [; blank, fastemit_lambda, latency_lambda])
+    rnnt_loss(logits, targets, input_lengths, blank [; fastemit_lambda, latency_lambda])
+    rnnt_loss(logits, target [; input_length, blank, fastemit_lambda, latency_lambda])
 
-Batched RNN-T / transducer loss (Graves 2012), mean over batch.
+RNN-T / transducer loss (Graves 2012), mean over batch.
 
-- `logits`: `(V, T, U+1, B)` raw joint-network outputs (softmax applied
-  internally), where `T` bounds encoder frames and `U+1` bounds prediction
-  states (`⟨start⟩` plus up to `U` labels).
-- `targets`: `Vector{Vector{Int}}` label sequences (no blank).
-- `input_lengths`: valid encoder frames per sample.
+- **Batched** `logits`: `(V, T, U+1, B)` raw joint-network outputs (softmax
+  applied internally), where `T` bounds encoder frames and `U+1` bounds
+  prediction states (`⟨start⟩` plus up to `U` labels).
+  `targets::Vector{Vector{Int}}`, `input_lengths::Vector{Int}`.
+- **Single-sample** `logits`: `(V, T, U+1)` with `target::Vector{Int}`;
+  `input_length` defaults to `T`.
 - `blank` defaults to `size(logits, 1)` (last class), matching CTCLoss.jl.
 - `latency_lambda`: minimum-latency training (Shinohara & Watanabe,
   Interspeech 2022) — augments the loss with `λ · E[Σᵤ tᵤ] / U`, the
@@ -114,12 +116,12 @@ same forward-backward pass, so Zygote never traces the kernels. Memory note:
 the joint tensor is `O(V·T·U·B)` — for long inputs train on shorter windows
 or smaller batches.
 """
-function rnnt_loss_batched(logits::AbstractArray{T,4},
-                           targets::Vector{Vector{Int}},
-                           input_lengths::Vector{Int};
-                           blank::Int = size(logits, 1),
-                           fastemit_lambda::Real = 0,
-                           latency_lambda::Real = 0) where {T}
+function rnnt_loss(logits::AbstractArray{T,4},
+                   targets::Vector{Vector{Int}},
+                   input_lengths::Vector{Int};
+                   blank::Int = size(logits, 1),
+                   fastemit_lambda::Real = 0,
+                   latency_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, _ = rnnt_forward_backward(logits, labels, target_lengths,
                                     input_lengths, blank, fastemit_lambda,
@@ -127,17 +129,37 @@ function rnnt_loss_batched(logits::AbstractArray{T,4},
     loss
 end
 
-function rnnt_loss_batched(logits::AbstractArray{T,4},
-                           targets::Vector{Vector{Int}},
-                           input_lengths::Vector{Int},
-                           blank::Int;
-                           fastemit_lambda::Real = 0,
-                           latency_lambda::Real = 0) where {T}
-    rnnt_loss_batched(logits, targets, input_lengths; blank,
-                      fastemit_lambda, latency_lambda)
+function rnnt_loss(logits::AbstractArray{T,4},
+                   targets::Vector{Vector{Int}},
+                   input_lengths::Vector{Int},
+                   blank::Int;
+                   fastemit_lambda::Real = 0,
+                   latency_lambda::Real = 0) where {T}
+    rnnt_loss(logits, targets, input_lengths; blank,
+              fastemit_lambda, latency_lambda)
 end
 
-function ChainRulesCore.rrule(::typeof(rnnt_loss_batched),
+function rnnt_loss(logits::AbstractArray{T,3},
+                   target::Vector{Int};
+                   input_length::Int = size(logits, 2),
+                   blank::Int = size(logits, 1),
+                   fastemit_lambda::Real = 0,
+                   latency_lambda::Real = 0) where {T}
+    rnnt_loss(reshape(logits, size(logits)..., 1), [target], [input_length];
+              blank, fastemit_lambda, latency_lambda)
+end
+
+function rnnt_loss(logits::AbstractArray{T,3},
+                   target::Vector{Int},
+                   input_length::Int,
+                   blank::Int;
+                   fastemit_lambda::Real = 0,
+                   latency_lambda::Real = 0) where {T}
+    rnnt_loss(logits, target; input_length, blank, fastemit_lambda,
+              latency_lambda)
+end
+
+function ChainRulesCore.rrule(::typeof(rnnt_loss),
                               logits::AbstractArray{T,4},
                               targets::Vector{Vector{Int}},
                               input_lengths::Vector{Int};
@@ -153,7 +175,7 @@ function ChainRulesCore.rrule(::typeof(rnnt_loss_batched),
     loss, rnnt_pullback
 end
 
-function ChainRulesCore.rrule(::typeof(rnnt_loss_batched),
+function ChainRulesCore.rrule(::typeof(rnnt_loss),
                               logits::AbstractArray{T,4},
                               targets::Vector{Vector{Int}},
                               input_lengths::Vector{Int},

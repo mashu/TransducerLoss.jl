@@ -12,27 +12,27 @@ gradients w.r.t. **raw logits** are computed inside the forward-backward.
 
 Two losses, one lattice core:
 
-- [`rnnt_loss_batched`](@ref) — vanilla RNN-T (Graves 2012,
+- [`rnnt_loss`](@ref) — vanilla RNN-T (Graves 2012,
   arXiv:1211.3711): blank advances time by one, labels advance the label
   axis in place.
-- [`tdt_loss_batched`](@ref) — Token-and-Duration Transducer (Xu et al.,
+- [`tdt_loss`](@ref) — Token-and-Duration Transducer (Xu et al.,
   ICML 2023, arXiv:2304.06795): a second duration head lets every emission
   advance time by a learned stride, enabling frame-skipping decode; with
   `durations = [0, 1]` its alignment space strictly contains RNN-T's.
-- [`monotonic_rnnt_loss_batched`](@ref) — Monotonic RNN-T as TDT with
+- [`monotonic_rnnt_loss`](@ref) — Monotonic RNN-T as TDT with
   `durations = [1]` (diagonal-only alignments).
 - **FastEmit** — `fastemit_lambda` on RNN-T and TDT (Yu et al.,
   arXiv:2010.11148); gradient-only latency regularization.
 - **Minimum-latency** — `latency_lambda` on RNN-T (Shinohara & Watanabe,
   Interspeech 2022): augments the loss with the exact expected label
   emission frame via a first-moment (expectation-semiring) forward-backward.
-- [`hat_loss_batched`](@ref) — Hybrid Autoregressive Transducer (Variani et
+- [`hat_loss`](@ref) — Hybrid Autoregressive Transducer (Variani et
   al. 2020): Bernoulli blank factorization enabling internal-LM subtraction;
   reuses the shared lattice kernels with its own emissions and gradient.
-- [`pruned_rnnt_loss_batched`](@ref) + [`pruning_bounds`](@ref) — banded
+- [`pruned_rnnt_loss`](@ref) + [`pruning_bounds`](@ref) — banded
   lattice (Kuang et al. 2022): the joint lives on `O(V·T·S·B)` instead of
   `O(V·T·U·B)`; with a full-width band it equals vanilla RNN-T exactly.
-- [`pruned_tdt_loss_batched`](@ref) + [`tdt_pruning_bounds`](@ref) — the same
+- [`pruned_tdt_loss`](@ref) + [`tdt_pruning_bounds`](@ref) — the same
   banding for TDT, including FastEmit (a per-cell gradient reweighting, so
   banding does not interfere). Bounds are estimated on the **TDT** lattice,
   not RNN-T's: frame-skipping blanks move occupancy, and bounds from the
@@ -63,15 +63,15 @@ using NNlib: logsoftmax
 
 export pack_transducer_targets,
        rnnt_forward_backward,
-       rnnt_loss_batched,
+       rnnt_loss,
        tdt_forward_backward,
-       tdt_loss_batched,
-       monotonic_rnnt_loss_batched,
+       tdt_loss,
+       monotonic_rnnt_loss,
        hat_forward_backward,
-       hat_loss_batched,
+       hat_loss,
        pruned_forward_backward,
-       pruned_rnnt_loss_batched,
-       pruned_tdt_loss_batched,
+       pruned_rnnt_loss,
+       pruned_tdt_loss,
        pruning_bounds,
        tdt_pruning_bounds
 

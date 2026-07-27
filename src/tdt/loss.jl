@@ -86,17 +86,19 @@ function tdt_forward_backward(logits::AbstractArray{T,4},
 end
 
 """
-    tdt_loss_batched(logits, dur_logits, targets, input_lengths, durations;
-                     blank = size(logits, 1), sigma = 0, fastemit_lambda = 0)
+    tdt_loss(logits, dur_logits, targets, input_lengths, durations;
+             blank = size(logits, 1), sigma = 0, fastemit_lambda = 0)
+    tdt_loss(logits, dur_logits, target, durations; input_length, blank, sigma,
+             fastemit_lambda)
 
-Batched **Token-and-Duration Transducer** loss (Xu et al., ICML 2023,
+**Token-and-Duration Transducer** loss (Xu et al., ICML 2023,
 arXiv:2304.06795) — the frame-skipping generalization of RNN-T behind
 NVIDIA's Parakeet-TDT models. Mean over the batch; blank defaults to the
 last token class (the CTCLoss.jl / TransducerLoss.jl convention).
 
-- `logits`: `(V, T, U+1, B)` raw token-head outputs.
-- `dur_logits`: `(D, T, U+1, B)` raw duration-head outputs, one class per
-  entry of `durations`.
+- **Batched** `logits`: `(V, T, U+1, B)`, `dur_logits`: `(D, T, U+1, B)`.
+- **Single-sample** `logits` / `dur_logits`: drop the batch axis; pass one
+  `target::Vector{Int}` (`input_length` defaults to `T`).
 - `durations`: ascending duration set, e.g. `[0, 1, 2, 3, 4]` or
   `(0, 1, 2, 3, 4)`. Blank transitions use durations ≥ 1; tokens may use
   0 (multiple tokens per frame, as in RNN-T). The exit blank lands exactly
@@ -106,23 +108,23 @@ last token class (the CTCLoss.jl / TransducerLoss.jl convention).
   0 disables).
 - `fastemit_lambda`: FastEmit regularization; scales label-emission
   gradients by `(1 + λ)` on both token and duration heads. Loss scalar
-  unchanged; see [`rnnt_loss_batched`](@ref).
+  unchanged; see [`rnnt_loss`](@ref).
 
 With `durations = [0, 1]` the alignment space is a strict superset of
 vanilla RNN-T's (tokens may also advance time directly). With
 `durations = [1]` every emission advances time by one frame — equivalent
-to **Monotonic RNN-T** (see [`monotonic_rnnt_loss_batched`](@ref)).
+to **Monotonic RNN-T** (see [`monotonic_rnnt_loss`](@ref)).
 Gradients for **both** logit tensors arrive through a ChainRulesCore
 `rrule` computed inside the same forward-backward pass.
 """
-function tdt_loss_batched(logits::AbstractArray{T,4},
-                          dur_logits::AbstractArray{T,4},
-                          targets::Vector{Vector{Int}},
-                          input_lengths::Vector{Int},
-                          durations::DurationSpec;
-                          blank::Int = size(logits, 1),
-                          sigma::Real = 0,
-                          fastemit_lambda::Real = 0) where {T}
+function tdt_loss(logits::AbstractArray{T,4},
+                  dur_logits::AbstractArray{T,4},
+                  targets::Vector{Vector{Int}},
+                  input_lengths::Vector{Int},
+                  durations::DurationSpec;
+                  blank::Int = size(logits, 1),
+                  sigma::Real = 0,
+                  fastemit_lambda::Real = 0) where {T}
     labels, target_lengths = pack_transducer_targets(targets, blank)
     loss, _, _ = tdt_forward_backward(logits, dur_logits, labels,
                                       target_lengths, input_lengths,
@@ -130,28 +132,55 @@ function tdt_loss_batched(logits::AbstractArray{T,4},
     loss
 end
 
-"""
-    monotonic_rnnt_loss_batched(logits, targets, input_lengths;
-                                blank = size(logits, 1), sigma = 0,
-                                fastemit_lambda = 0)
+function tdt_loss(logits::AbstractArray{T,3},
+                  dur_logits::AbstractArray{T,3},
+                  target::Vector{Int},
+                  durations::DurationSpec;
+                  input_length::Int = size(logits, 2),
+                  blank::Int = size(logits, 1),
+                  sigma::Real = 0,
+                  fastemit_lambda::Real = 0) where {T}
+    tdt_loss(reshape(logits, size(logits)..., 1),
+             reshape(dur_logits, size(dur_logits)..., 1),
+             [target], [input_length], durations;
+             blank, sigma, fastemit_lambda)
+end
 
-Batched **Monotonic RNN-T** loss — at most one label per frame, no vertical
+"""
+    monotonic_rnnt_loss(logits, targets, input_lengths;
+                        blank = size(logits, 1), sigma = 0,
+                        fastemit_lambda = 0)
+    monotonic_rnnt_loss(logits, target; input_length, blank, sigma,
+                        fastemit_lambda)
+
+**Monotonic RNN-T** loss — at most one label per frame, no vertical
 token transitions. Implemented as TDT with `durations = [1]` and a trivial
 duration head (`dur_logits` all zeros ⇒ softmax probability 1). Equivalent
 to restricting the lattice to diagonal label moves plus blank advances.
+Batched `logits` are `(V, T, U+1, B)`; single-sample `(V, T, U+1)`.
 """
-function monotonic_rnnt_loss_batched(logits::AbstractArray{T,4},
-                                     targets::Vector{Vector{Int}},
-                                     input_lengths::Vector{Int};
-                                     blank::Int = size(logits, 1),
-                                     sigma::Real = 0,
-                                     fastemit_lambda::Real = 0) where {T}
+function monotonic_rnnt_loss(logits::AbstractArray{T,4},
+                             targets::Vector{Vector{Int}},
+                             input_lengths::Vector{Int};
+                             blank::Int = size(logits, 1),
+                             sigma::Real = 0,
+                             fastemit_lambda::Real = 0) where {T}
     dur_logits = zeros(T, 1, size(logits, 2), size(logits, 3), size(logits, 4))
-    tdt_loss_batched(logits, dur_logits, targets, input_lengths, (1,);
-                     blank, sigma, fastemit_lambda)
+    tdt_loss(logits, dur_logits, targets, input_lengths, (1,);
+             blank, sigma, fastemit_lambda)
 end
 
-function ChainRulesCore.rrule(::typeof(tdt_loss_batched),
+function monotonic_rnnt_loss(logits::AbstractArray{T,3},
+                             target::Vector{Int};
+                             input_length::Int = size(logits, 2),
+                             blank::Int = size(logits, 1),
+                             sigma::Real = 0,
+                             fastemit_lambda::Real = 0) where {T}
+    monotonic_rnnt_loss(reshape(logits, size(logits)..., 1), [target],
+                        [input_length]; blank, sigma, fastemit_lambda)
+end
+
+function ChainRulesCore.rrule(::typeof(tdt_loss),
                               logits::AbstractArray{T,4},
                               dur_logits::AbstractArray{T,4},
                               targets::Vector{Vector{Int}},
@@ -170,7 +199,7 @@ function ChainRulesCore.rrule(::typeof(tdt_loss_batched),
     loss, tdt_pullback
 end
 
-function ChainRulesCore.rrule(::typeof(monotonic_rnnt_loss_batched),
+function ChainRulesCore.rrule(::typeof(monotonic_rnnt_loss),
                               logits::AbstractArray{T,4},
                               targets::Vector{Vector{Int}},
                               input_lengths::Vector{Int};

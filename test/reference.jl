@@ -43,8 +43,7 @@ function brute_rnnt_nll(logits::Array{Float64,3}, target::Vector{Int}, blank::In
 end
 
 single(logits, target, blank) =
-    rnnt_loss_batched(reshape(logits, size(logits)..., 1), [target],
-                      [size(logits, 2)], blank)
+    rnnt_loss(logits, target, size(logits, 2), blank)
 
 "Brute force TDT: enumerate every (token, duration) lattice path."
 function brute_tdt_nll(tok::Array{Float64,3}, dur::Array{Float64,3},
@@ -76,9 +75,7 @@ function brute_tdt_nll(tok::Array{Float64,3}, dur::Array{Float64,3},
 end
 
 tdt_single(tok, dur, target, blank, durations; sigma = 0.0) =
-    tdt_loss_batched(reshape(tok, size(tok)..., 1),
-                     reshape(dur, size(dur)..., 1), [target],
-                     [size(tok, 2)], durations; blank, sigma)
+    tdt_loss(tok, dur, target, durations; blank, sigma)
 
 "Label-emission posteriors P(emit label at (t,u) | x) for FastEmit verification."
 function ref_rnnt_label_posts(logits::Array{Float64,3}, target::Vector{Int},
@@ -295,14 +292,12 @@ function brute_monotonic_rnnt_nll(tok::Array{Float64,3}, target::Vector{Int},
 end
 
 pruned_single(logits, off, target, blank) =
-    pruned_rnnt_loss_batched(reshape(logits, size(logits)..., 1),
-                             reshape(off, length(off), 1), [target],
-                             [size(logits, 2)]; blank)
+    pruned_rnnt_loss(logits, off, target; blank)
 
 """Brute-force banded TDT NLL: enumerate every alignment that stays in band.
 
 Mirrors `brute_tdt_nll` with a `band_slot` guard on every visited cell — the
-independent oracle for `pruned_tdt_loss_batched`. Alignments leaving the band
+independent oracle for `pruned_tdt_loss`. Alignments leaving the band
 are simply not enumerated, which is exactly what the banded lattice does.
 """
 function brute_pruned_tdt_nll(tok::Array{Float64,3}, dur::Array{Float64,3},
@@ -340,7 +335,4 @@ function brute_pruned_tdt_nll(tok::Array{Float64,3}, dur::Array{Float64,3},
 end
 
 pruned_tdt_single(tok, dur, off, target, blank, durations; sigma = 0.0) =
-    pruned_tdt_loss_batched(reshape(tok, size(tok)..., 1),
-                            reshape(dur, size(dur)..., 1),
-                            reshape(off, length(off), 1), [target],
-                            [size(tok, 2)], durations; blank, sigma)
+    pruned_tdt_loss(tok, dur, off, target, durations; blank, sigma)
