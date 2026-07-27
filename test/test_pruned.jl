@@ -177,14 +177,21 @@ end
     end
 
     @testset "banding never lowers the loss" begin
-        # Dropping alignments can only remove probability mass.
+        # Dropping alignments can only remove probability mass — compare the
+        # full joint against the same scores restricted to band cells.
         V, T, U1, blank = 4, 6, 3, 4
         target = [1, 2]
         tok = randn(rng, V, T, U1)
         dur = randn(rng, length(durs), T, U1)
         full = tdt_single(tok, dur, target, blank, durs)
-        narrow = pruned_tdt_single(tok[:, :, 1:2], dur[:, :, 1:2],
-                                   [0, 0, 0, 1, 1, 1], target, blank, durs)
+        offv, S = [0, 0, 0, 1, 1, 1], 2
+        tok_b = Array{Float64}(undef, V, T, S)
+        dur_b = Array{Float64}(undef, length(durs), T, S)
+        for t in 1:T, s in 1:S
+            tok_b[:, t, s] .= tok[:, t, offv[t] + s]
+            dur_b[:, t, s] .= dur[:, t, offv[t] + s]
+        end
+        narrow = pruned_tdt_single(tok_b, dur_b, offv, target, blank, durs)
         @test narrow >= full - 1e-9
     end
 

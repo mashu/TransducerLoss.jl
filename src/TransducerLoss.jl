@@ -86,5 +86,7 @@ include("pruned/kernels.jl") # banded-lattice column kernels + trivial joint
 include("pruned/loss.jl")    # banded loss, API, pruning_bounds
 include("tdt/kernels.jl")    # TDT diagonal/gradient kernels
 include("tdt/loss.jl")       # TDT driver + API + rrule
+include("pruned/tdt_kernels.jl") # banded TDT column kernels
+include("pruned/tdt.jl")     # banded TDT API + tdt_pruning_bounds
 
 end
