@@ -32,6 +32,11 @@ Two losses, one lattice core:
 - [`pruned_rnnt_loss_batched`](@ref) + [`pruning_bounds`](@ref) — banded
   lattice (Kuang et al. 2022): the joint lives on `O(V·T·S·B)` instead of
   `O(V·T·U·B)`; with a full-width band it equals vanilla RNN-T exactly.
+- [`pruned_tdt_loss_batched`](@ref) + [`tdt_pruning_bounds`](@ref) — the same
+  banding for TDT, including FastEmit (a per-cell gradient reweighting, so
+  banding does not interfere). Bounds are estimated on the **TDT** lattice,
+  not RNN-T's: frame-skipping blanks move occupancy, and bounds from the
+  wrong transition model silently push alignment mass out of the band.
 
 They live in one package deliberately: both operate on the same
 `(t frames, u labels)` lattice and share the emission gather, α
@@ -66,7 +71,9 @@ export pack_transducer_targets,
        hat_loss_batched,
        pruned_forward_backward,
        pruned_rnnt_loss_batched,
-       pruning_bounds
+       pruned_tdt_loss_batched,
+       pruning_bounds,
+       tdt_pruning_bounds
 
 include("core/utils.jl")     # logaddexp
 include("core/labels.jl")    # pack_transducer_targets

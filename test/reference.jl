@@ -298,3 +298,49 @@ pruned_single(logits, off, target, blank) =
     pruned_rnnt_loss_batched(reshape(logits, size(logits)..., 1),
                              reshape(off, length(off), 1), [target],
                              [size(logits, 2)]; blank)
+
+"""Brute-force banded TDT NLL: enumerate every alignment that stays in band.
+
+Mirrors `brute_tdt_nll` with a `band_slot` guard on every visited cell — the
+independent oracle for `pruned_tdt_loss_batched`. Alignments leaving the band
+are simply not enumerated, which is exactly what the banded lattice does.
+"""
+function brute_pruned_tdt_nll(tok::Array{Float64,3}, dur::Array{Float64,3},
+                              off::AbstractVector{<:Integer},
+                              target::Vector{Int}, blank::Int,
+                              durations::Vector{Int}, sigma::Float64)
+    V, T, S = size(tok)
+    U = length(target)
+    lp = logsoftmax_ref(tok; dims = 1)
+    ld = logsoftmax_ref(dur; dims = 1)
+    band_slot(Int(off[1]), 1, S) > 0 || return Inf
+    total = Ref(-Inf)
+    function walk(t, u, acc)
+        s = band_slot(Int(off[t]), u, S)
+        s == 0 && return
+        for (i, dd) in enumerate(durations)
+            if dd >= 1
+                score = acc + lp[blank, t, s] + ld[i, t, s] - sigma
+                if t + dd <= T
+                    band_slot(Int(off[t + dd]), u, S) > 0 &&
+                        walk(t + dd, u, score)
+                elseif t + dd == T + 1 && u == U + 1
+                    total[] = logaddexp(total[], score)
+                end
+            end
+            if u <= U && t + dd <= T &&
+               band_slot(Int(off[t + dd]), u + 1, S) > 0
+                walk(t + dd, u + 1,
+                     acc + lp[target[u], t, s] + ld[i, t, s] - sigma)
+            end
+        end
+    end
+    walk(1, 1, 0.0)
+    -total[]
+end
+
+pruned_tdt_single(tok, dur, off, target, blank, durations; sigma = 0.0) =
+    pruned_tdt_loss_batched(reshape(tok, size(tok)..., 1),
+                            reshape(dur, size(dur)..., 1),
+                            reshape(off, length(off), 1), [target],
+                            [size(tok, 2)], durations; blank, sigma)

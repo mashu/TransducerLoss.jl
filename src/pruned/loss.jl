@@ -148,7 +148,7 @@ function pruning_bounds(am::AbstractArray{T,3}, lm::AbstractArray{T,3},
 
     # Small (T, B) result: finish on CPU.
     A, Bt, El = Array(α), Array(β), Array(em_l)
-    off = zeros(Int32, Tmax, B)
+    centres = zeros(Float64, Tmax, B)
     for b in 1:B
         Tb = clamp(input_lengths[b], 0, Tmax)
         Ub = Int(target_lengths[b])
@@ -162,9 +162,38 @@ function pruning_bounds(am::AbstractArray{T,3}, lm::AbstractArray{T,3},
                 num += u * p
                 den += p
             end
-            center = den > 0 ? num / den : prev
-            prev = center
-            cand = clamp(round(Int, center - band_width / 2), 0,
+            prev = den > 0 ? num / den : prev
+            centres[t, b] = prev
+        end
+    end
+    band_offsets_from_centres(centres, target_lengths, input_lengths,
+                              band_width, Tmax)
+end
+
+"""
+    band_offsets_from_centres(centres, target_lengths, input_lengths,
+                              band_width, Tmax) -> Matrix{Int32}
+
+Turn a per-frame band centre (in `u` units) into offsets satisfying the band
+contract: monotone non-decreasing, `off[1, b] == 0`, growth capped at
+`band_width − 1` per frame so an alignment can still climb inside the band,
+and a tail ramp so the exit cell stays reachable.
+
+Shared by [`pruning_bounds`](@ref) and [`tdt_pruning_bounds`](@ref) — only
+the centring statistic differs between them, never the feasibility rules.
+"""
+function band_offsets_from_centres(centres::Matrix{Float64},
+                                   target_lengths::Vector{Int32},
+                                   input_lengths::Vector{Int},
+                                   band_width::Int, Tmax::Int)
+    B = length(input_lengths)
+    off = zeros(Int32, Tmax, B)
+    for b in 1:B
+        Tb = clamp(input_lengths[b], 0, Tmax)
+        Ub = Int(target_lengths[b])
+        Tb < 1 && continue
+        for t in 1:Tb
+            cand = clamp(round(Int, centres[t, b] - band_width / 2), 0,
                          max(0, Ub + 1 - band_width))
             off[t, b] = max(t > 1 ? off[t - 1, b] : Int32(0), Int32(cand))
         end
